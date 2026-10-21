@@ -11,6 +11,10 @@ on:
         description: "AI 연결만 시험 (예시 문제 하나 생성, 저장 안 함)"
         type: boolean
         default: false
+      limit:
+        description: "이번에 처리할 복기 수 (기본 10)"
+        type: number
+        default: 10
 
 permissions:
   contents: write
@@ -25,7 +29,7 @@ jobs:
   generate:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +38,8 @@ jobs:
       - name: 새 복기로 문제 만들기
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BOKGI_BOT_TOKEN: ${{ secrets.BOKGI_BOT_TOKEN }}
+          BOKGI_LIMIT: ${{ inputs.limit || 10 }}
         run: python tools/generate.py ${{ inputs.selftest && '--selftest' || '' }}
       - name: 결과 저장
         if: ${{ !inputs.selftest }}
@@ -43,6 +49,7 @@ jobs:
           git add data/
           if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
           git commit -m "주간 자동 점검: 복기 기반 문제 생성"
+          git pull --rebase
           git push
 
   deploy:

@@ -1,0 +1,23 @@
+name: 데이터베이스 깨우기
+
+# Supabase 무료 플랜은 1주일 동안 요청이 없으면 일시정지돼요. 매일 한 번 가볍게 조회해서 깨워둬요.
+on:
+  schedule:
+    - cron: "30 18 * * *"   # 매일 새벽 3시 30분 (한국 시간)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: 조회 한 번
+        run: |
+          URL=$(grep -oP 'supabaseUrl:\s*"\K[^"]+' config.js)
+          KEY=$(grep -oP 'supabaseKey:\s*"\K[^"]+' config.js)
+          curl -fsS "$URL/rest/v1/rpc/get_ranking" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{"lim":1}'
+          echo

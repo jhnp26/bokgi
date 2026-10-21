@@ -93,8 +93,58 @@ select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var
 .rec .topic{font-weight:700;overflow-wrap:anywhere}
 .rec .note{font-size:13.5px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
 
+/* account & auth */
+.topline{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.account{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.account b{font-weight:700}
+.btn-line.sm{padding:5px 12px;font-size:13.5px}
+.authtabs{display:flex;gap:6px;align-items:center}
+.authtabs .close{margin-left:auto}
+.seg{font:inherit;font-weight:500;background:none;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:5px 14px;cursor:pointer}
+.seg[aria-pressed="true"]{border-color:var(--omr);color:var(--omr);background:var(--omr-soft)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}
+.grid2 .full,.grid2 .actions,.grid2 .rule{grid-column:1/-1}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:13px;font-weight:500}
+input,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0;max-width:100%}
+textarea{resize:vertical;min-height:84px}
+input:focus-visible,textarea:focus-visible{outline:2px solid var(--omr);outline-offset:2px}
+.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.msg{font-size:13px;color:var(--muted)}
+.msg.err{color:var(--bad)}
+.rule{font-size:13px;background:var(--omr-soft);border-radius:8px;padding:10px 12px}
+.pill{display:inline-block;font-size:11.5px;padding:0 8px;border-radius:999px;font-weight:500;background:var(--warn-soft);color:var(--warn)}
+.pill.used{background:var(--ok-soft);color:var(--ok)}
+.pill.accepted{background:var(--omr-soft);color:var(--omr)}
+.pill.rejected{background:var(--bad-soft);color:var(--bad)}
+
+/* ranking */
+.rank{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-variant-numeric:tabular-nums}
+.rank th,.rank td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:14px}
+.rank th{font-size:12.5px;color:var(--muted);font-weight:500}
+.rank td.num,.rank th.num{text-align:right;font-family:var(--f-num)}
+.rank tr.me td{background:var(--omr-soft)}
+.rank .medal{font-family:var(--f-num);color:var(--omr);font-weight:500}
+.tablewrap{overflow-x:auto}
+
+/* mock exam */
+.mockgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.mockcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mockcard h3{margin:0;font-size:16px}
+.mockcard .sec{font-family:var(--f-num);font-size:12.5px;color:var(--muted)}
+.mockcard .best{font-size:12.5px;color:var(--ok)}
+.mockcard .btn{align-self:flex-start;margin-top:auto}
+.examhead{position:sticky;top:calc(env(safe-area-inset-top,0px) + 46px);z-index:4;background:var(--paper);display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding-block:8px;border-bottom:1px solid var(--line)}
+.examhead .timer{font-family:var(--f-num);font-size:15px;font-variant-numeric:tabular-nums}
+.examhead .prog{font-family:var(--f-num);font-size:13px;color:var(--muted)}
+.choice.picked{background:var(--omr-soft)}
+.choice.picked .bub{background:var(--omr);color:var(--on-accent)}
+.sechead{font-size:15px;font-weight:700;border-left:3px solid var(--omr);padding-left:8px;margin-top:6px}
+.result{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.result .big{font-family:var(--f-num);font-size:34px;color:var(--omr);line-height:1.1}
+
 footer{border-top:1px solid var(--line);padding-top:14px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
 footer p{margin:0}
 
-@media (max-width:560px){h1{font-size:24px} .q{padding:16px 14px}}
+@media (max-width:560px){h1{font-size:24px} .q{padding:16px 14px} .grid2{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:no-preference){.choice,.tab{transition:background-color .15s,color .15s}}

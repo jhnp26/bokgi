@@ -1,0 +1,11 @@
+{
+  "basis": "학과 취업지원 시트의 복기 문제 번호 기준이에요. 실제 시험 구성과 다를 수 있으니 채용공고를 꼭 확인하세요.",
+  "exams": [
+    {"company": "한전KPS", "sections": [{"name": "전공", "count": 50}]},
+    {"company": "한국전기안전공사", "sections": [{"name": "전공", "count": 50}]},
+    {"company": "한국가스공사", "sections": [{"name": "전공", "count": 50}]},
+    {"company": "한국중부발전", "sections": [{"name": "전공", "count": 50}]},
+    {"company": "한국동서발전", "sections": [{"name": "전공", "count": 40}, {"name": "한국사", "count": 10, "subjects": ["한국사"]}]},
+    {"company": "한국전력공사", "sections": [{"name": "전공", "count": 10}], "note": "복기 시트에 10번까지만 있어요. 실제 문항 수 확인 필요"}
+  ]
+}

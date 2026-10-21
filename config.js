@@ -1,9 +1,9 @@
-// 운영자가 채우는 설정. 운영가이드.md의 "구글폼 연결" 단계를 참고하세요.
+// 사이트 설정. 아래 두 값은 공개용(publishable)이라 사이트에 들어가도 안전해요.
 window.BOKGI_CONFIG = {
-  // 복기 제출용 구글폼 주소 (예: https://forms.gle/xxxx)
-  formUrl: "https://forms.gle/157YNb1UA63yxq4U7",
-  // 응답 시트를 "웹에 게시 > CSV"로 게시한 주소 (예: https://docs.google.com/spreadsheets/d/e/.../pub?output=csv)
-  sheetCsvUrl: "https://docs.google.com/spreadsheets/d/1vInLwgLFqWcQxnhOgembIWuWfV1I-4H4-wtMfLiSJw8/gviz/tq?tqx=out:csv&gid=2132100575",
-  // 문제 오류 신고 창구 (오픈채팅방 링크나 별도 구글폼). 비워두면 신고 버튼이 숨겨져요.
+  supabaseUrl: "https://yntqvprxqsedcurnietu.supabase.co",
+  supabaseKey: "sb_publishable_6AY5vLEyeCCt4wv9PAgcyw_sbjd_Luo",
+  // 로그인 아이디를 내부적으로 이메일 형식으로 바꿀 때 쓰는 주소 (실제 메일은 보내지 않음)
+  idDomain: "id.bokgi.kr",
+  // 문제 오류 신고 창구 (오픈채팅방 링크 등). 비워두면 신고 버튼이 숨겨져요.
   reportUrl: ""
 };
