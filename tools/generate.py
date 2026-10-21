@@ -1,7 +1,7 @@
 """새 복기를 읽어 변형 문제를 자동으로 만들어 data/problems.json 에 추가한다.
 
 GitHub Actions 에서 매주 실행된다 (.github/workflows/site.yml).
-- AI: GitHub Models (GITHUB_TOKEN, 무료 한도) → 실패하면 GEMINI_API_KEY 가 있을 때 Gemini 무료 등급
+- AI: Google Gemini API 무료 등급 (저장소 Secret 의 GEMINI_API_KEY). 모델이 막히면 다음 후보 모델로 넘어간다
 - AI가 멈추거나 한도를 넘으면 조용히 끝내고, 남은 복기는 다음 실행 때 다시 시도한다
 - 만든 문제는 AI가 한 번 더 풀어서 정답이 일치할 때만 추가하고, 항상 reviewed=false 로 둔다
 
@@ -27,8 +27,10 @@ CONFIG = os.path.join(ROOT, "config.js")
 
 MAX_ROWS_PER_RUN = 10          # 한 번에 처리할 새 복기 수 (무료 한도 보호)
 MAX_PER_TOPIC = 2              # 같은 주제로 자동 생성하는 문제 수 상한
-GITHUB_MODEL = os.environ.get("BOKGI_MODEL", "openai/gpt-4.1")
-GEMINI_MODEL = os.environ.get("BOKGI_GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+# 앞에서부터 시도. 무료 등급에서 막힌 모델(404/429/403)은 건너뛴다. BOKGI_MODELS 로 바꿀 수 있다 (쉼표 구분)
+MODELS = [m.strip() for m in os.environ.get(
+    "BOKGI_MODELS", "gemini-3.8-flash,gemini-3.1-flash-lite,gemini-2.5-flash").split(",") if m.strip()]
 
 PREFIX = {"회로이론": "CT", "전력공학": "PW", "전기기기": "MC", "전기자기학": "EM", "제어공학": "CL",
           "전기설비": "ES", "전기설비기술기준": "ES", "KEC": "ES"}
@@ -119,21 +121,27 @@ def _post(url, key, model, messages):
     return data["choices"][0]["message"]["content"]
 
 
+_dead_models = set()
+
+
 def chat(messages):
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        raise AIUnavailable("GEMINI_API_KEY 가 설정되지 않음")
     errors = []
-    gh = os.environ.get("GITHUB_TOKEN")
-    if gh:
+    for model in MODELS:
+        if model in _dead_models:
+            continue
         try:
-            return _post("https://models.github.ai/inference/chat/completions", gh, GITHUB_MODEL, messages)
-        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
-            errors.append("GitHub Models: %s" % e)
-    gm = os.environ.get("GEMINI_API_KEY")
-    if gm:
-        try:
-            return _post("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", gm, GEMINI_MODEL, messages)
-        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
-            errors.append("Gemini: %s" % e)
-    raise AIUnavailable("; ".join(errors) or "사용할 수 있는 AI 키가 없음")
+            return _post(GEMINI_URL, key, model, messages)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:200]
+            errors.append("%s: HTTP %s %s" % (model, e.code, detail))
+            if e.code in (400, 403, 404, 429):
+                _dead_models.add(model)     # 이번 실행에서는 다시 시도하지 않음
+        except (urllib.error.URLError, KeyError, IndexError, ValueError, TimeoutError) as e:
+            errors.append("%s: %s" % (model, e))
+    raise AIUnavailable(" | ".join(errors) or "사용할 수 있는 모델이 없음")
 
 
 def fake_chat(messages):

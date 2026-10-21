@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: write
-  models: read
   pages: write
   id-token: write
 
@@ -34,7 +33,6 @@ jobs:
           python-version: "3.12"
       - name: 새 복기로 문제 만들기
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python tools/generate.py ${{ inputs.selftest && '--selftest' || '' }}
       - name: 결과 저장
