@@ -125,7 +125,8 @@ _dead_models = set()
 
 
 def chat(messages):
-    key = os.environ.get("GEMINI_API_KEY")
+    # 윈도우에서 저장할 때 붙는 BOM·공백 제거
+    key = (os.environ.get("GEMINI_API_KEY") or "").replace("﻿", "").strip()
     if not key:
         raise AIUnavailable("GEMINI_API_KEY 가 설정되지 않음")
     errors = []
