@@ -35,7 +35,7 @@ MODELS = [m.strip() for m in os.environ.get(
 RETRY_WAITS = [10, 30, 60]     # 일시적 과부하(503, 시간 초과) 때 기다렸다 다시 시도하는 간격(초)
 
 PREFIX = {"회로이론": "CT", "전력공학": "PW", "전기기기": "MC", "전기자기학": "EM", "제어공학": "CL",
-          "전기설비": "ES", "전기설비기술기준": "ES", "KEC": "ES"}
+          "전기설비": "ES", "KEC": "ES", "한국사": "HS", "회사상식": "NU", "원자력": "NU"}
 COMMON_SUBJECTS = ("의사소통", "수리", "문제해결", "자원관리", "정보", "조직이해", "한국사", "회사상식", "NCS")
 COLS = {"time": ["타임스탬프", "timestamp"], "company": ["기업"], "period": ["시기"], "track": ["직렬"],
         "subject": ["과목"], "topic": ["주제"], "kind": ["유형"], "level": ["난이도"], "note": ["메모"]}
@@ -176,6 +176,7 @@ GEN_SYSTEM = """너는 한국 공기업 전기직 필기시험(전공·NCS) 대�
 - 계산 문제는 숫자가 깔끔하게 떨어지게 설계하고, 답을 낸 뒤 반드시 처음부터 다시 검산한다.
 - 오답 보기는 수험생이 실제로 자주 하는 실수(공식 혼동, 단위, √3 누락 등)에서 만든다.
 - 해설은 3~6줄, '~요' 체로 단계별 풀이와 외워둘 포인트를 쓴다.
+- 수식에 LaTeX($, \\frac, \\sqrt 등)나 마크다운을 쓰지 말고 √, ², ³, ×, ÷, ≈, Ω, π, θ, ∠ 같은 일반 기호로 쓴다. 예: I = 30,000 / (√3 × 10) ≈ 1,732A
 - 복기가 전기 공학·공기업 필기와 무관하거나 장난·홍보·욕설이면 ok를 false로 한다.
 JSON 하나만 출력한다:
 {"ok": true, "topic": "짧은 주제명", "level": 1~3, "q": "문제", "choices": ["보기1","보기2","보기3","보기4"], "answer": 정답 보기 번호(0~3), "explain": "해설"}
@@ -183,6 +184,33 @@ JSON 하나만 출력한다:
 
 VERIFY_SYSTEM = """너는 전기공학 문제 검토자다. 주어진 4지선다 문제를 처음부터 직접 풀어라.
 JSON 하나만 출력한다: {"answer": 정답 보기 번호(0~3), "work": "핵심 풀이 한두 줄"}"""
+
+
+LATEX = [(r"\left", ""), (r"\right", ""), (r"^\circ", "°"), (r"^{\circ}", "°"), (r"\circ", "°"), (r"\times", "×"), (r"\div", "÷"), (r"\approx", "≈"), (r"\cdot", "·"), (r"\pm", "±"), (r"\le", "≤"),
+         (r"\ge", "≥"), (r"\neq", "≠"), (r"\ne", "≠"), (r"\infty", "∞"), (r"\angle", "∠"), (r"\Omega", "Ω"),
+         (r"\omega", "ω"), (r"\pi", "π"), (r"\theta", "θ"), (r"\delta", "δ"), (r"\mu", "μ"), (r"\varepsilon", "ε"),
+         (r"\epsilon", "ε"), (r"\phi", "φ"), (r"\Phi", "Φ"), (r"\rho", "ρ"), (r"\sigma", "σ"), (r"\lambda", "λ"),
+         (r"\alpha", "α"), (r"\eta", "η"), (r"\tau", "τ"), (r"\%", "%"), (r"\,", " "), (r"\;", " "), (r"\ ", " ")]
+SUP = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+
+
+def plain(s):
+    """AI가 섞어 쓴 LaTeX를 사이트에서 읽히는 일반 기호로 바꾼다."""
+    if "\\" not in s and "$" not in s:
+        return s
+    s = s.replace("$", "")
+    for a, b in LATEX[:5]:                      # 각도 기호는 ^ 처리보다 먼저
+        s = s.replace(a, b)
+    for _ in range(3):
+        s = re.sub(r"\\(?:text|mathrm|mathbf|operatorname)\{([^{}]*)\}", r"\1", s)
+        s = re.sub(r"\\d?frac\{([^{}]*)\}\{([^{}]*)\}", r"(\1) / (\2)", s)
+        s = re.sub(r"\\sqrt\{([^{}]*)\}", lambda m: "√" + (m.group(1) if len(m.group(1)) <= 2 else "(" + m.group(1) + ")"), s)
+    s = re.sub(r"\^\{([-0-9]+)\}|\^([0-9])", lambda m: (m.group(1) or m.group(2)).translate(SUP), s)
+    s = re.sub(r"_\{([^{}]*)\}", r"\1", s)
+    for a, b in LATEX:
+        s = s.replace(a, b)
+    s = re.sub(r"\(([^()\s+\-×/·]+)\)", r"\1", s)   # (30) / (√3) → 30 / √3
+    return re.sub(r"[ \t]{2,}", " ", s)
 
 
 def valid(p):
@@ -202,6 +230,8 @@ def make_problem(rec, ask):
             return None, "AI 판단: " + str(p.get("reason", "부적절한 복기"))[:80]
         if not valid(p):
             continue
+        p["q"], p["explain"] = plain(p["q"]), plain(p["explain"])
+        p["choices"] = [plain(c) for c in p["choices"]]
         listing = "\n".join("%d) %s" % (i, c) for i, c in enumerate(p["choices"]))
         v = parse_json(ask([{"role": "system", "content": VERIFY_SYSTEM},
                             {"role": "user", "content": "아래 문제를 직접 풀어라.\n\n%s\n\n%s" % (p["q"], listing)}]))

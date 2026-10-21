@@ -128,7 +128,7 @@
         el("span", { class: "qid" }, S.mock ? "Q" + String(i + 1).padStart(2, "0") : p.id),
         el("span", {}, [p.company && p.company !== "공통" ? p.company : null, p.subject, p.topic].filter(Boolean).join(" · ")),
         el("span", { class: "lv", title: "난이도" }, stars(p.level)),
-        p.source === "AI 자동 생성" ? el("span", { class: "badge src", title: p.basis || "" }, "AI 자동 생성") : null,
+        p.basis ? el("span", { class: "badge src" }, p.source === "AI 자동 생성" ? p.basis + " · 자동" : p.basis) : null,
         p.reviewed ? el("span", { class: "badge ok" }, "검수 완료") : el("span", { class: "badge" }, "검수 전")),
       el("p", { class: "qtext" }, p.q || ""),
       el("ol", { class: "choices" }, choices),
@@ -228,24 +228,28 @@
     }).filter((o) => o.topic || o.subject);
   }
 
-  let trendState = { loaded: false, records: [], company: "" };
+  let trendState = { loaded: false, records: [], interviews: [], company: "", sheetFailed: false };
   async function loadTrend() {
     if (trendState.loaded) return;
-    const box = $("trend");
-    if (!CFG.sheetCsvUrl) {
-      box.replaceChildren(el("div", { class: "empty" }, "아직 연결된 복기 데이터가 없어요. 복기가 모이기 시작하면 과목별 출제 빈도와 자주 나온 주제가 여기에 자동으로 정리돼요."));
-      trendState.loaded = true;
-      return;
-    }
+    trendState.loaded = true;
+    let live = [], seed = [];
     try {
-      const r = await fetch(CFG.sheetCsvUrl, { cache: "no-cache" });
-      if (!r.ok) throw new Error(r.status);
-      trendState.records = toRecords(parseCSV(await r.text())).reverse();
-      trendState.loaded = true;
-      renderTrend();
-    } catch (e) {
-      box.replaceChildren(el("div", { class: "empty" }, "복기 데이터를 불러오지 못했어요. 잠시 후 다시 열어주세요."));
+      const r = await fetch("data/recalls.json", { cache: "no-cache" });
+      if (r.ok) {
+        const j = await r.json();
+        seed = (j.recalls || []).map((x) => Object.assign({ period: "", track: "전기", level: "", note: "" }, x));
+        trendState.interviews = j.interviews || [];
+      }
+    } catch (e) {}
+    if (CFG.sheetCsvUrl) {
+      try {
+        const r = await fetch(CFG.sheetCsvUrl, { cache: "no-cache" });
+        if (!r.ok) throw new Error(r.status);
+        live = toRecords(parseCSV(await r.text())).reverse();
+      } catch (e) { trendState.sheetFailed = true; }
     }
+    trendState.records = live.concat(seed);
+    renderTrend();
   }
 
   function countBy(arr) {
@@ -270,8 +274,10 @@
     const bySub = countBy(rs.map((r) => r.subject));
     const max = bySub.length ? bySub[0][1] : 1;
     const byTopic = countBy(rs.map((r) => r.topic)).slice(0, 30);
+    const ivs = trendState.interviews.filter((q) => !sel.value || q.company === sel.value);
 
     box.replaceChildren(
+      trendState.sheetFailed ? el("div", { class: "empty" }, "새로 올라온 복기를 불러오지 못해서 지금까지 정리된 자료만 보여드려요.") : null,
       el("div", { class: "toolbar" }, sel),
       el("div", { class: "stats" },
         el("span", {}, el("b", {}, String(rs.length)), " 건의 복기"),
@@ -283,11 +289,15 @@
       })),
       el("h2", {}, "자주 나온 주제"),
       el("div", { class: "chips" }, byTopic.map(([k, n]) => el("span", { class: "chip" }, k, el("b", {}, String(n))))),
-      el("h2", {}, "최근 올라온 복기"),
-      el("div", { class: "list" }, rs.slice(0, 20).map((r) => el("article", { class: "rec" },
+      el("h2", {}, "올라온 복기"),
+      el("div", { class: "list" }, rs.slice(0, 30).map((r) => el("article", { class: "rec" },
         el("div", { class: "meta" }, [r.company, r.period, r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : ""].filter(Boolean).join(" · ")),
         el("div", { class: "topic" }, r.topic),
-        r.note ? el("div", { class: "note" }, r.note) : null)))
+        r.note ? el("div", { class: "note" }, r.note) : null))),
+      rs.length > 30 ? el("p", { class: "muted" }, "최근 30건만 보여요. 위에서 기업을 고르면 그 기업 복기만 볼 수 있어요.") : null,
+      ivs.length ? el("h2", {}, "면접 기출") : null,
+      ivs.length ? el("div", { class: "panel" }, el("ul", { class: "rules" },
+        ivs.map((q) => el("li", {}, el("b", {}, q.company), " · ", q.q)))) : null
     );
   }
 
