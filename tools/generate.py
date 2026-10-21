@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -30,7 +31,8 @@ MAX_PER_TOPIC = 2              # 같은 주제로 자동 생성하는 문제 수
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 # 앞에서부터 시도. 무료 등급에서 막힌 모델(404/429/403)은 건너뛴다. BOKGI_MODELS 로 바꿀 수 있다 (쉼표 구분)
 MODELS = [m.strip() for m in os.environ.get(
-    "BOKGI_MODELS", "gemini-3.8-flash,gemini-3.1-flash-lite,gemini-2.5-flash").split(",") if m.strip()]
+    "BOKGI_MODELS", "gemini-3.8-flash,gemini-3.1-flash-lite").split(",") if m.strip()]
+RETRY_WAITS = [10, 30, 60]     # 일시적 과부하(503, 시간 초과) 때 기다렸다 다시 시도하는 간격(초)
 
 PREFIX = {"회로이론": "CT", "전력공학": "PW", "전기기기": "MC", "전기자기학": "EM", "제어공학": "CL",
           "전기설비": "ES", "전기설비기술기준": "ES", "KEC": "ES"}
@@ -116,7 +118,7 @@ def _post(url, key, model, messages):
     body = json.dumps({"model": model, "messages": messages, "temperature": 0.4}).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Content-Type": "application/json", "Authorization": "Bearer " + key})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=180) as r:
         data = json.loads(r.read().decode("utf-8"))
     return data["choices"][0]["message"]["content"]
 
@@ -133,15 +135,22 @@ def chat(messages):
     for model in MODELS:
         if model in _dead_models:
             continue
-        try:
-            return _post(GEMINI_URL, key, model, messages)
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")[:200]
-            errors.append("%s: HTTP %s %s" % (model, e.code, detail))
-            if e.code in (400, 403, 404, 429):
-                _dead_models.add(model)     # 이번 실행에서는 다시 시도하지 않음
-        except (urllib.error.URLError, KeyError, IndexError, ValueError, TimeoutError) as e:
-            errors.append("%s: %s" % (model, e))
+        for wait in RETRY_WAITS + [None]:
+            try:
+                return _post(GEMINI_URL, key, model, messages)
+            except urllib.error.HTTPError as e:
+                detail = re.sub(r"\s+", " ", e.read().decode("utf-8", "replace"))[:160]
+                err = "%s: HTTP %s %s" % (model, e.code, detail)
+                if e.code in (400, 403, 404, 429):
+                    _dead_models.add(model)     # 이번 실행에서는 다시 시도하지 않음
+                    wait = None
+            except (urllib.error.URLError, KeyError, IndexError, ValueError, TimeoutError, OSError) as e:
+                err = "%s: %s" % (model, e)
+            if wait is None:
+                errors.append(err)
+                break
+            print("  잠시 후 다시 시도 (%ss): %s" % (wait, err[:100]))
+            time.sleep(wait)
     raise AIUnavailable(" | ".join(errors) or "사용할 수 있는 모델이 없음")
 
 
