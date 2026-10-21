@@ -1,0 +1,60 @@
+name: 사이트 배포와 문제 자동 생성
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * 1"   # 매주 월요일 오전 9시 (한국 시간)
+  workflow_dispatch:       # Actions 탭에서 "Run workflow"로 바로 실행
+
+permissions:
+  contents: write
+  models: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 새 복기로 문제 만들기
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python tools/generate.py
+      - name: 결과 저장
+        run: |
+          git config user.name "bokgi-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "주간 자동 점검: 복기 기반 문제 생성"
+          git push
+
+  deploy:
+    needs: generate
+    if: always() && (needs.generate.result == 'success' || needs.generate.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4

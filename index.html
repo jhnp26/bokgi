@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>공기업 복기 뱅크</title>
+<meta name="description" content="공기업 전기 직렬 필기 대비. 선배와 동기들이 남긴 복기를 바탕으로 만든 변형 문제와 해설.">
+<meta name="theme-color" content="#1c2230">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Myeongjo:wght@400;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">전기 직렬 · 필기 대비</div>
+    <h1>공기업 복기 뱅크</h1>
+    <p>시험 보고 온 선배와 동기들이 남긴 출제 주제를 같은 유형의 새 문제와 해설로 바꿔 모아두는 곳이에요. 로그인 없이 바로 풀면 되고, 풀이 기록은 이 기기에만 저장돼요.</p>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="메뉴">
+    <button class="tab" role="tab" id="tab-solve" data-tab="solve" aria-controls="p-solve" aria-selected="true">문제 풀기</button>
+    <button class="tab" role="tab" id="tab-trend" data-tab="trend" aria-controls="p-trend" aria-selected="false">출제 경향</button>
+    <button class="tab" role="tab" id="tab-recall" data-tab="recall" aria-controls="p-recall" aria-selected="false">복기 남기기</button>
+  </nav>
+
+  <section id="p-solve" role="tabpanel" aria-labelledby="tab-solve">
+    <div class="toolbar">
+      <select id="f-sub" aria-label="과목"></select>
+      <select id="f-view" aria-label="보기 범위">
+        <option value="all">전체 문제</option>
+        <option value="todo">안 푼 문제</option>
+        <option value="wrong">틀린 문제 (오답노트)</option>
+      </select>
+      <button type="button" class="btn-line" id="mock">랜덤 10문제</button>
+    </div>
+    <div class="mockbar" id="mockbar" hidden>
+      <span id="mocktext"></span>
+      <button type="button" class="btn-line" id="mockend">모의고사 끝내기</button>
+    </div>
+    <div class="scoreline" id="score"></div>
+    <div class="list" id="qlist"><div class="empty">문제를 불러오는 중이에요…</div></div>
+    <div class="toolbar end"><button type="button" class="btn-ghost" id="reset">이 기기의 풀이 기록 지우기</button></div>
+  </section>
+
+  <section id="p-trend" role="tabpanel" aria-labelledby="tab-trend" hidden>
+    <div id="trend"><div class="empty">출제 경향을 불러오는 중이에요…</div></div>
+  </section>
+
+  <section id="p-recall" role="tabpanel" aria-labelledby="tab-recall" hidden>
+    <div class="panel">
+      <h2>시험 보고 왔다면 복기를 남겨주세요</h2>
+      <p>남겨준 주제는 출제 경향에 바로 쌓이고, 운영자가 같은 유형의 새 문제와 해설로 만들어 올려요. 다음 사람을 위한 가장 큰 도움이에요.</p>
+      <ul class="rules">
+        <li><b>문제 원문은 그대로 옮기지 마세요.</b> 어떤 주제가 어떤 식으로 나왔는지만 적어주세요. 시험 문제는 출제기관의 저작물이고, 유출 금지 서약을 받는 시험도 있어요.</li>
+        <li>이름, 연락처, 수험번호 같은 개인정보는 적지 마세요. 남긴 내용은 이 사이트에 공개돼요.</li>
+        <li>예: <span class="ex">회로이론 · RL 직렬회로 유효전력 계산 · 계산 · 보기에 역률 함정 있었음</span></li>
+      </ul>
+      <div id="formbox"></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>문제는 AI로 만들고 운영자가 검수해요. <span class="badge">검수 전</span> 표시가 붙은 문제는 아직 확인 중이니 해설을 참고만 하세요.</p>
+    <p id="updated"></p>
+  </footer>
+</div>
+<script src="config.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
