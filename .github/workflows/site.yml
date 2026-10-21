@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "0 0 * * 1"   # 매주 월요일 오전 9시 (한국 시간)
   workflow_dispatch:       # Actions 탭에서 "Run workflow"로 바로 실행
+    inputs:
+      selftest:
+        description: "AI 연결만 시험 (예시 문제 하나 생성, 저장 안 함)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -31,8 +36,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python tools/generate.py
+        run: python tools/generate.py ${{ inputs.selftest && '--selftest' || '' }}
       - name: 결과 저장
+        if: ${{ !inputs.selftest }}
         run: |
           git config user.name "bokgi-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

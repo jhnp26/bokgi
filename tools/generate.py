@@ -203,7 +203,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", help="구글 시트 대신 읽을 로컬 CSV")
     ap.add_argument("--fake", action="store_true", help="AI 대신 가짜 응답 사용 (시험용)")
+    ap.add_argument("--selftest", action="store_true", help="예시 복기 하나로 AI 연결만 확인 (저장 안 함)")
     args = ap.parse_args()
+
+    if args.selftest:
+        sample = {"time": "", "company": "한국수력원자력", "period": "시험", "track": "전기", "subject": "전력공학",
+                  "topic": "%임피던스로 3상 단락전류 계산", "kind": "계산", "level": "3", "note": "기준용량이 주어짐"}
+        try:
+            p, why = make_problem(sample, chat)
+        except AIUnavailable as e:
+            print("AI 연결 실패:", e)
+            sys.exit(1)
+        print(json.dumps(p, ensure_ascii=False, indent=2) if p else "생성 실패: " + why)
+        return
 
     now = dt.datetime.now(dt.timezone.utc)
     bank = load_json(PROBLEMS, {"updated": "", "problems": []})
