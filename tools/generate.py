@@ -180,7 +180,7 @@ def chat(messages):
 def fake_chat(messages):
     """로컬 시험용 가짜 응답."""
     if "직접 풀어" in messages[-1]["content"]:
-        return '{"answer": 1, "work": "시험용"}'
+        return '{"answer": 1, "single": true, "self_contained": true, "explain_ok": true, "work": "시험용"}'
     return json.dumps({"ok": True, "topic": "시험용 주제", "level": 1, "q": "시험용 문제입니다. 2번이 정답인가? $\\sqrt{3}$",
                        "choices": ["아니다", "그렇다", "모른다", "없다"], "answer": 1,
                        "explain": "시험용 해설이에요."}, ensure_ascii=False)
@@ -199,15 +199,22 @@ GEN_SYSTEM = """너는 한국 공기업 전기직 필기시험(전공·NCS) 대�
 - 난이도는 공기업 고졸·전문대 채용 전기 필기(전기기능사~산업기사) 수준을 기본으로 한다.
 - 계산 문제는 숫자가 깔끔하게 떨어지게 설계하고, 답을 낸 뒤 반드시 처음부터 다시 검산한다.
 - 오답 보기는 수험생이 실제로 자주 하는 실수(공식 혼동, 단위, √3 누락 등)에서 만든다.
-- 해설은 3~6줄, '~요' 체로 단계별 풀이와 외워둘 포인트를 쓴다.
+- 해설은 3~6줄, '~요' 체로 단계별 풀이와 외워둘 포인트를 쓴다. 해설의 결론은 반드시 정답 보기와 같아야 한다.
+- 정답은 정확히 하나여야 한다. '옳은 것/옳지 않은 것' 문제는 나머지 보기 셋이 모두 반대가 되는지 하나씩 확인한다.
+- 그림·표·회로도가 있어야 풀 수 있는 문제는 만들지 않는다 ('그림과 같이' 금지). 조건은 모두 글로 준다.
+- 보기에 '1.' 같은 번호를 붙이지 않는다.
 - 수식에 LaTeX($, \\frac, \\sqrt 등)나 마크다운을 쓰지 말고 √, ², ³, ×, ÷, ≈, Ω, π, θ, ∠ 같은 일반 기호로 쓴다. 예: I = 30,000 / (√3 × 10) ≈ 1,732A
 - 복기가 전기 공학·공기업 필기와 무관하거나 장난·홍보·욕설이면 ok를 false로 한다.
 JSON 하나만 출력한다:
 {"ok": true, "topic": "짧은 주제명", "level": 1~3, "q": "문제", "choices": ["보기1","보기2","보기3","보기4"], "answer": 정답 보기 번호(0~3), "explain": "해설"}
 또는 {"ok": false, "reason": "사유"}"""
 
-VERIFY_SYSTEM = """너는 전기공학 문제 검토자다. 주어진 4지선다 문제를 처음부터 직접 풀어라.
-JSON 하나만 출력한다: {"answer": 정답 보기 번호(0~3), "work": "핵심 풀이 한두 줄"}"""
+VERIFY_SYSTEM = """너는 까다로운 전기공학 문제 검토자다. 주어진 4지선다 문제를 해설을 보지 말고 처음부터 직접 풀고, 계산은 한 번 더 검산해라.
+그다음 아래를 판정해라.
+- single: 정답인 보기가 정확히 하나인가 (옳은/옳지 않은 것 문제는 보기 넷을 하나씩 따져라)
+- self_contained: 그림·표 없이 글만으로 풀 수 있는가
+- explain_ok: 제시된 해설의 풀이와 결론이 네가 구한 정답과 일치하고 모순이 없는가
+JSON 하나만 출력한다: {"answer": 정답 보기 번호(0~3), "single": true/false, "self_contained": true/false, "explain_ok": true/false, "work": "핵심 풀이 한두 줄"}"""
 
 
 LATEX = [(r"\left", ""), (r"\right", ""), (r"^\circ", "°"), (r"^{\circ}", "°"), (r"\circ", "°"), (r"\times", "×"),
@@ -258,10 +265,15 @@ def make_problem(rec, ask):
             continue
         p["q"], p["explain"] = plain(p["q"]), plain(p["explain"])
         p["choices"] = [plain(c) for c in p["choices"]]
+        p["choices"] = [re.sub(r"^\s*[1-4①-④][.)]\s*", "", c) for c in p["choices"]]
+        if re.search(r"그림과 같|아래 그림|다음 그림|표와 같", p["q"]):
+            continue
         listing = "\n".join("%d) %s" % (i, c) for i, c in enumerate(p["choices"]))
         v = parse_json(ask([{"role": "system", "content": VERIFY_SYSTEM},
-                            {"role": "user", "content": "아래 문제를 직접 풀어라.\n\n%s\n\n%s" % (p["q"], listing)}]))
-        if v.get("answer") == p["answer"]:
+                            {"role": "user", "content": "아래 문제를 직접 풀어라.\n\n%s\n\n%s\n\n<제시된 해설>\n%s\n</제시된 해설>"
+                             % (p["q"], listing, p["explain"])}]))
+        if (v.get("answer") == p["answer"] and v.get("single") is True
+                and v.get("self_contained") is not False and v.get("explain_ok") is True):
             return p, None
     return None, ("accepted", "검산이 맞지 않아 문제는 보류했어요")
 
