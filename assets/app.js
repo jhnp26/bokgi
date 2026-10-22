@@ -486,8 +486,7 @@
       const { data, error } = await sb.rpc("admin_create_code", { n });
       make.disabled = false;
       if (error) { out.textContent = "코드를 만들지 못했어요."; out.className = "msg err"; return; }
-      const text = n + "님 가입 코드: " + data + "
-https://jhnp26.github.io/bokgi/ 회원가입에서 실명 '" + n + "'과 함께 입력하세요. (1회용)";
+      const text = n + "님 가입 코드: " + data + "\nhttps://jhnp26.github.io/bokgi/ 회원가입에서 실명 '" + n + "'과 함께 입력하세요. (1회용)";
       const copy = el("button", { type: "button", class: "btn-line sm" }, "보낼 문구 복사");
       copy.addEventListener("click", async () => {
         try { await navigator.clipboard.writeText(text); copy.textContent = "복사됐어요"; } catch (err) { copy.textContent = "직접 선택해서 복사하세요"; }
