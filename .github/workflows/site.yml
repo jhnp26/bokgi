@@ -63,6 +63,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: 새 버전 표시 (브라우저 캐시 무효화)
+        run: sed -i "s/__V__/${GITHUB_SHA::8}/g" index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
