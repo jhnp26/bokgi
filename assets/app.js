@@ -61,7 +61,7 @@
   const S = {
     problems: [], loaded: false,
     answers: store.get("answers", {}) || {},
-    user: null, nickname: "", realName: "", isAdmin: false,
+    user: null, nickname: "", realName: "", isAdmin: false, verified: false,
     exams: null, mock: null, timer: null
   };
 
@@ -88,7 +88,7 @@
     if (S.user) {
       const out = el("button", { type: "button", class: "btn-ghost" }, "로그아웃");
       out.addEventListener("click", async () => { await sb.auth.signOut(); });
-      box.replaceChildren(el("span", {}, el("b", {}, myName() || "회원"), "님", S.isAdmin ? " · 운영자" : ""), out);
+      box.replaceChildren(el("span", {}, el("b", {}, myName() || "회원"), "님", S.isAdmin ? " · 운영자" : (S.realName && !S.verified ? " · 실명 확인 대기" : "")), out);
     } else {
       const b = el("button", { type: "button", class: "btn-line sm" }, "로그인 / 회원가입");
       b.addEventListener("click", () => openAuth("login"));
@@ -138,9 +138,10 @@
         if (BAD_WORDS.test(nick) || /(미친|운영자|관리자|admin)/i.test(nick)) return setMsg("쓸 수 없는 닉네임이에요.", true);
         if (!invite) return setMsg("가입 코드를 적어주세요. 단톡방 공지에 있어요.", true);
         setMsg("확인하는 중…");
-        const inv = await sb.rpc("check_invite", { code: invite });
+        const inv = await sb.rpc("check_invite", { code: invite, rname: real });
         if (inv.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
-        if (!inv.data) return setMsg("가입 코드가 맞지 않아요.", true);
+        if (inv.data === "mismatch") return setMsg("이 개인 코드는 다른 실명으로 만들어졌어요. 실명을 정확히 적어주세요.", true);
+        if (inv.data !== "shared" && inv.data !== "personal") return setMsg("가입 코드가 맞지 않아요.", true);
         const ok = await sb.rpc("username_available", { u: id });
         if (ok.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
         if (!ok.data) return setMsg("이미 쓰고 있는 아이디예요.", true);
@@ -164,11 +165,11 @@
   async function onSession(session) {
     const prev = S.user && S.user.id;
     S.user = session ? session.user : null;
-    S.nickname = ""; S.realName = ""; S.isAdmin = false;
+    S.nickname = ""; S.realName = ""; S.isAdmin = false; S.verified = false;
     if (S.user) {
       const { data } = await sb.rpc("my_profile");
       const me = data && data[0];
-      if (me) { S.nickname = me.nickname; S.realName = me.real_name || ""; S.isAdmin = !!me.is_admin; }
+      if (me) { S.nickname = me.nickname; S.realName = me.real_name || ""; S.isAdmin = !!me.is_admin; S.verified = !!me.verified; }
     }
     $("realbox").hidden = !(S.user && !S.realName);
     renderAccount();
@@ -415,6 +416,12 @@
         el("p", {}, "복기를 올리려면 실명이 필요해요. 화면 위쪽의 '실명을 등록해 주세요' 칸에 적어주세요."), rules));
       return;
     }
+    if (!S.verified && !S.isAdmin) {
+      box.replaceChildren(el("div", { class: "panel" }, el("h2", {}, "실명 확인을 기다리는 중이에요"),
+        el("p", {}, "운영자가 실명(" + S.realName + ")을 확인하면 복기를 올리고 랭킹에 오를 수 있어요. 그 전에도 문제 풀기와 모의고사는 다 쓸 수 있어요."),
+        el("p", { class: "muted" }, "오래 걸리면 단톡방에서 운영자에게 아이디를 알려주세요."), rules));
+      return;
+    }
     const f = {
       co: opts(el("select", { id: "r-co" }), COMPANIES), period: opts(el("select", { id: "r-period" }), PERIODS),
       track: opts(el("select", { id: "r-track" }), TRACKS),
@@ -453,11 +460,92 @@
     });
     const mine = el("div", { class: "list" }, el("div", { class: "empty" }, "내 복기를 불러오는 중이에요…"));
     const admin = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "검토할 복기를 불러오는 중이에요…")) : null;
+    const members = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "회원 목록을 불러오는 중이에요…")) : null;
+    const codes = S.isAdmin ? el("div", { class: "list" }) : null;
     box.replaceChildren(
-      ...(S.isAdmin ? [el("h2", {}, "운영자 검토 (공개 전 복기)"), admin] : []),
+      ...(S.isAdmin ? [el("h2", {}, "운영자 · 개인 가입 코드"), codes, el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin] : []),
       el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), rules), form, el("h2", {}, "내가 올린 복기"), mine);
     loadMine(mine);
     if (admin) loadAdmin(admin);
+    if (members) loadMembers(members);
+    if (codes) loadCodes(codes);
+  }
+
+  async function loadCodes(box) {
+    const name = el("input", { id: "c-name", maxlength: "5", placeholder: "후배 실명 (한글)", "aria-label": "실명" });
+    const make = el("button", { type: "submit", class: "btn sm" }, "개인 코드 만들기");
+    const out = el("div", { class: "msg", role: "status" });
+    const form = el("form", { class: "panel", novalidate: "" },
+      el("p", { class: "muted" }, "실명을 넣으면 그 사람만 쓸 수 있는 일회용 코드가 만들어져요. 1:1로 보내주면, 그 코드와 같은 실명으로 가입한 사람은 바로 '실명 확인됨'이 돼요. 코드는 지금 한 번만 보여줘요."),
+      el("div", { class: "actions" }, name, make), out);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const n = name.value.trim();
+      if (!/^[가-힣]{2,5}$/.test(n)) { out.textContent = "실명은 한글 2~5자로 적어주세요."; out.className = "msg err"; return; }
+      make.disabled = true;
+      const { data, error } = await sb.rpc("admin_create_code", { n });
+      make.disabled = false;
+      if (error) { out.textContent = "코드를 만들지 못했어요."; out.className = "msg err"; return; }
+      const text = n + "님 가입 코드: " + data + "
+https://jhnp26.github.io/bokgi/ 회원가입에서 실명 '" + n + "'과 함께 입력하세요. (1회용)";
+      const copy = el("button", { type: "button", class: "btn-line sm" }, "보낼 문구 복사");
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(text); copy.textContent = "복사됐어요"; } catch (err) { copy.textContent = "직접 선택해서 복사하세요"; }
+      });
+      out.className = "msg";
+      out.replaceChildren(el("b", {}, n + " → " + data), " ", copy);
+      name.value = "";
+      loadCodeList(list);
+    });
+    const list = el("div", { class: "list" });
+    box.replaceChildren(form, list);
+    loadCodeList(list);
+  }
+
+  async function loadCodeList(box) {
+    const { data, error } = await sb.rpc("admin_codes");
+    if (error || !data.length) { box.replaceChildren(); return; }
+    box.replaceChildren(...data.map((c) => {
+      const kids = [el("div", { class: "meta" }, "만든 날 " + new Date(c.created_at).toLocaleDateString("ko-KR")),
+        el("div", { class: "topic" }, c.real_name + (c.used ? " → 가입함 (" + (c.used_nickname || "탈퇴") + ")" : " · 아직 안 씀"))];
+      if (!c.used) {
+        const d = el("button", { type: "button", class: "btn-ghost" }, "코드 삭제");
+        armButton(d, "코드 삭제", "한 번 더 누르면 삭제돼요", async () => { await sb.rpc("admin_delete_code", { cid: c.id }); loadCodeList(box); });
+        kids.push(d);
+      }
+      return el("article", { class: "rec" }, kids);
+    }));
+  }
+
+  let showVerified = false;
+  async function loadMembers(box) {
+    const { data, error } = await sb.rpc("admin_members");
+    if (error) { box.replaceChildren(el("div", { class: "empty" }, "회원 목록을 불러오지 못했어요.")); return; }
+    const waiting = data.filter((m) => !m.verified && !m.is_admin), done = data.filter((m) => m.verified && !m.is_admin);
+    const row = (m) => {
+      const kids = [
+        el("div", { class: "meta" }, ["아이디 " + m.username, "닉네임 " + m.nickname, "가입 " + new Date(m.created_at).toLocaleDateString("ko-KR"), "복기 " + m.recalls + "건"].join(" · ")),
+        el("div", { class: "topic" }, m.real_name || "(실명 미등록)")
+      ];
+      const set = (ok) => async () => { const { error: err } = await sb.rpc("admin_verify", { uid: m.id, ok }); if (!err) loadMembers(box); };
+      if (!m.verified) {
+        const b = el("button", { type: "button", class: "btn-line sm" }, "실명 확인");
+        if (!m.real_name) b.disabled = true; else b.addEventListener("click", set(true));
+        kids.push(el("div", { class: "actions" }, b));
+      } else {
+        const b = el("button", { type: "button", class: "btn-ghost" }, "확인 취소");
+        armButton(b, "확인 취소", "한 번 더 누르면 취소돼요", set(false));
+        kids.push(el("div", { class: "actions" }, el("span", { class: "pill used" }, "확인됨"), b));
+      }
+      return el("article", { class: "rec" }, kids);
+    };
+    const toggle = el("button", { type: "button", class: "btn-ghost" }, showVerified ? "확인된 회원 숨기기" : "확인된 회원 " + done.length + "명 보기");
+    toggle.addEventListener("click", () => { showVerified = !showVerified; loadMembers(box); });
+    box.replaceChildren(
+      waiting.length ? el("p", { class: "muted" }, "아는 사람인지 실명을 보고 확인해 주세요. 확인된 회원만 복기를 올릴 수 있어요.") : el("div", { class: "empty" }, "확인을 기다리는 회원이 없어요."),
+      ...waiting.map(row),
+      done.length ? el("div", { class: "toolbar" }, toggle) : null,
+      ...(showVerified ? done.map(row) : []));
   }
 
   async function loadAdmin(box) {
