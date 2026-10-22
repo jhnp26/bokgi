@@ -130,10 +130,12 @@
         if (error) return setMsg("아이디나 비밀번호가 맞지 않아요.", true);
       } else {
         const nick = $("a-nick").value.trim(), real = $("a-real").value.trim(), invite = $("a-invite").value.trim().toUpperCase();
+        if (pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return setMsg("비밀번호는 영문과 숫자를 섞어 8자 이상으로 만들어주세요.", true);
+        if (pw.toLowerCase().includes(id)) return setMsg("비밀번호에 아이디를 넣지 마세요.", true);
         if (pw !== $("a-pw2").value) return setMsg("비밀번호 확인이 달라요.", true);
         if (!/^[가-힣]{2,5}$/.test(real)) return setMsg("실명은 한글 2~5자로 적어주세요.", true);
-        if (!nick || nick.length > 12) return setMsg("닉네임은 1~12자로 정해주세요.", true);
-        if (BAD_WORDS.test(nick)) return setMsg("닉네임에 바르지 않은 표현이 있어요.", true);
+        if (!/^[가-힣A-Za-z0-9_ ]{1,12}$/.test(nick)) return setMsg("닉네임은 한글·영문·숫자로 1~12자예요.", true);
+        if (BAD_WORDS.test(nick) || /(미친|운영자|관리자|admin)/i.test(nick)) return setMsg("쓸 수 없는 닉네임이에요.", true);
         if (!invite) return setMsg("가입 코드를 적어주세요. 단톡방 공지에 있어요.", true);
         setMsg("확인하는 중…");
         const inv = await sb.rpc("check_invite", { code: invite });

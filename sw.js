@@ -1,5 +1,5 @@
 // 네트워크 우선, 끊기면 마지막으로 받은 사본을 보여주는 간단한 오프라인 지원
-const CACHE = "bokgi-v2";
+const CACHE = "bokgi-v3";
 const SHELL = ["./", "index.html", "assets/style.css", "assets/app.js", "config.js", "data/problems.json", "data/recalls.json", "data/exams.json", "manifest.webmanifest", "icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {

@@ -6,6 +6,8 @@
 <title>공기업 복기 뱅크</title>
 <meta name="description" content="공기업 전기 직렬 필기 대비. 선배와 동기들이 남긴 복기를 바탕으로 만든 변형 문제, 회사별 모의고사, 복기 랭킹.">
 <meta name="theme-color" content="#1c2230">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://yntqvprxqsedcurnietu.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -33,7 +35,7 @@
     </div>
     <form id="authform" class="grid2" novalidate>
       <div class="field"><label for="a-id">아이디</label><input id="a-id" autocomplete="username" placeholder="영문 소문자·숫자·_ 3~16자" maxlength="16"></div>
-      <div class="field"><label for="a-pw">비밀번호</label><input id="a-pw" type="password" autocomplete="current-password" placeholder="6자 이상"></div>
+      <div class="field"><label for="a-pw">비밀번호</label><input id="a-pw" type="password" autocomplete="current-password" placeholder="가입 시 영문+숫자 8자 이상"></div>
       <div class="field" id="f-pw2" hidden><label for="a-pw2">비밀번호 확인</label><input id="a-pw2" type="password" autocomplete="new-password"></div>
       <div class="field" id="f-real" hidden><label for="a-real">실명</label><input id="a-real" maxlength="5" placeholder="한글 2~5자" autocomplete="name"></div>
       <div class="field" id="f-nick" hidden><label for="a-nick">닉네임</label><input id="a-nick" maxlength="12" placeholder="1~12자"></div>
@@ -98,7 +100,7 @@
     <p id="updated"></p>
   </footer>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
 <script src="config.js"></script>
 <script src="assets/app.js"></script>
 </body>
