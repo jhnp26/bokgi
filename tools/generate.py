@@ -83,12 +83,16 @@ def sb_request(method, path, body=None):
 
 
 def read_pending():
-    rows = sb_request("GET", "/rest/v1/recalls_public?select=id,nickname,%s&status=eq.pending&order=id.asc&limit=100"
-                      % ",".join(FIELDS))
+    """검사 전(pending)이거나 운영자가 승인만 해둔(accepted) 회원 복기. 공개 전이라 봇 토큰으로만 읽힌다."""
+    token = clean_secret("BOKGI_BOT_TOKEN")
+    if not token:
+        print("BOKGI_BOT_TOKEN 이 없어 회원 복기는 건너뜀")
+        return []
+    rows = sb_request("POST", "/rest/v1/rpc/bot_pending", {"token": token})
     out = []
     for r in rows or []:
         rec = {k: ("" if r.get(k) is None else str(r.get(k))).strip() for k in FIELDS}
-        rec.update(_id=r["id"], by=r.get("nickname") or "")
+        rec.update(_id=r["id"], by=r.get("nickname") or "", _status=r.get("status") or "pending")
         out.append(rec)
     return out
 
@@ -344,6 +348,8 @@ def main():
             done["seeds"][rec["_seed"]] = {"at": log["lastRun"], "result": (pid or status) + (" " + result if result else "")}
             log["seeds"] += 1
         else:
+            if status == "rejected" and rec.get("_status") == "accepted":
+                status = "accepted"         # 운영자가 승인한 복기는 AI가 반려하지 않는다
             mark(rec, status, pid, result)
             log["member"] += 1
 

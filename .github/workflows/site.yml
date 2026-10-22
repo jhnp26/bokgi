@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "0 0 * * 1"   # 매주 월요일 오전 9시 (한국 시간)
+    - cron: "0 0 * * *"   # 매일 오전 9시 (한국 시간): 새 복기 검사·문제 생성
   workflow_dispatch:       # Actions 탭에서 "Run workflow"로 바로 실행
     inputs:
       selftest:

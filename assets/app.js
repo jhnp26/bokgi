@@ -37,9 +37,21 @@
   const COMPANIES = ["한국수력원자력", "한국전력공사", "한전KPS", "한국전기안전공사", "한국남동발전", "한국남부발전", "한국동서발전", "한국서부발전", "한국중부발전", "한국가스공사", "한국전력기술", "기타"];
   const PERIODS = ["2026 하반기", "2026 상반기", "2025 하반기", "2025 상반기", "그 이전"];
   const TRACKS = ["전기", "기계", "화학", "원자력", "사무", "기타"];
-  const SUBS = ["회로이론", "전기자기학", "전기기기", "전력공학", "제어공학", "전기설비", "회사상식", "한국사", "NCS 의사소통", "NCS 수리", "NCS 문제해결"];
+  const SUBS = ["회로이론", "전기자기학", "전기기기", "전력공학", "제어공학", "전기설비", "회사상식", "한국사", "NCS 의사소통", "NCS 수리", "NCS 문제해결", "기타"];
+  const maskName = (n) => !n ? "" : n.length === 2 ? n[0] + "*" : n[0] + "*".repeat(n.length - 2) + n[n.length - 1];
+  const BAD_WORDS = /(시발|씨발|씨빨|ㅅㅂ|ㅆㅂ|병신|ㅂㅅ|좆|존나|졸라|개새|새끼|미친놈|미친년|꺼져|fuck|shit|bitch|섹스)/i;
+  // 서버(DB)와 같은 규칙으로 미리 알려주기. 실제 차단은 서버가 해요.
+  function checkRecallText(topic, note) {
+    const body = (topic + " " + note).toLowerCase();
+    if (topic.length < 4) return "출제 주제를 조금 더 구체적으로 (4자 이상) 적어주세요.";
+    if (!/[가-힣A-Za-z].*[가-힣A-Za-z]/.test(topic) || /^[ㄱ-ㅎㅏ-ㅣ0-9\s\p{P}\p{S}]+$/u.test(topic)) return "자음·모음이나 숫자만으로는 올릴 수 없어요. 어떤 주제였는지 글로 적어주세요.";
+    if (/(https?:\/\/|www\.|\.com|\.co\.kr|\.net|오픈채팅|카톡|open\.kakao)/.test(body)) return "링크나 연락처는 올릴 수 없어요.";
+    if (/([^0-9])\1{3,}/.test(body)) return "같은 글자를 계속 반복할 수 없어요.";
+    if (BAD_WORDS.test(body)) return "바르지 않은 표현이 있어요.";
+    return "";
+  }
   const KINDS = ["계산", "개념·정의", "그래프·회로 해석", "법규·상식", "기타"];
-  const STATUS = { pending: ["대기 중", ""], accepted: ["반영됨", "accepted"], used: ["문제로 만들어짐", "used"], rejected: ["반영 안 됨", "rejected"] };
+  const STATUS = { pending: ["검사 대기 · 나만 보여요", ""], accepted: ["반영됨", "accepted"], used: ["문제로 만들어짐", "used"], rejected: ["반영 안 됨", "rejected"] };
 
   let sb = null;
   try {
@@ -49,7 +61,7 @@
   const S = {
     problems: [], loaded: false,
     answers: store.get("answers", {}) || {},
-    user: null, nickname: "",
+    user: null, nickname: "", realName: "", isAdmin: false,
     exams: null, mock: null, timer: null
   };
 
@@ -76,7 +88,7 @@
     if (S.user) {
       const out = el("button", { type: "button", class: "btn-ghost" }, "로그아웃");
       out.addEventListener("click", async () => { await sb.auth.signOut(); });
-      box.replaceChildren(el("span", {}, el("b", {}, S.nickname || "회원"), "님"), out);
+      box.replaceChildren(el("span", {}, el("b", {}, myName() || "회원"), "님", S.isAdmin ? " · 운영자" : ""), out);
     } else {
       const b = el("button", { type: "button", class: "btn-line sm" }, "로그인 / 회원가입");
       b.addEventListener("click", () => openAuth("login"));
@@ -94,7 +106,7 @@
     authMode = mode;
     $("mode-login").setAttribute("aria-pressed", String(mode === "login"));
     $("mode-signup").setAttribute("aria-pressed", String(mode === "signup"));
-    $("f-nick").hidden = $("f-pw2").hidden = mode !== "signup";
+    ["f-nick", "f-pw2", "f-real", "f-invite", "a-real-note"].forEach((id) => { $(id).hidden = mode !== "signup"; });
     $("a-submit").textContent = mode === "signup" ? "가입하기" : "로그인";
     $("a-pw").setAttribute("autocomplete", mode === "signup" ? "new-password" : "current-password");
     setMsg("");
@@ -117,16 +129,22 @@
         const { error } = await sb.auth.signInWithPassword({ email: toEmail(id), password: pw });
         if (error) return setMsg("아이디나 비밀번호가 맞지 않아요.", true);
       } else {
-        const nick = $("a-nick").value.trim();
-        if (!nick || nick.length > 12) return setMsg("닉네임은 1~12자로 정해주세요.", true);
+        const nick = $("a-nick").value.trim(), real = $("a-real").value.trim(), invite = $("a-invite").value.trim().toUpperCase();
         if (pw !== $("a-pw2").value) return setMsg("비밀번호 확인이 달라요.", true);
+        if (!/^[가-힣]{2,5}$/.test(real)) return setMsg("실명은 한글 2~5자로 적어주세요.", true);
+        if (!nick || nick.length > 12) return setMsg("닉네임은 1~12자로 정해주세요.", true);
+        if (BAD_WORDS.test(nick)) return setMsg("닉네임에 바르지 않은 표현이 있어요.", true);
+        if (!invite) return setMsg("가입 코드를 적어주세요. 단톡방 공지에 있어요.", true);
         setMsg("확인하는 중…");
+        const inv = await sb.rpc("check_invite", { code: invite });
+        if (inv.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
+        if (!inv.data) return setMsg("가입 코드가 맞지 않아요.", true);
         const ok = await sb.rpc("username_available", { u: id });
         if (ok.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
         if (!ok.data) return setMsg("이미 쓰고 있는 아이디예요.", true);
         const dup = await sb.from("profiles").select("id").eq("nickname", nick).limit(1);
         if (dup.data && dup.data.length) return setMsg("이미 쓰고 있는 닉네임이에요.", true);
-        const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw, options: { data: { username: id, nickname: nick } } });
+        const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw, options: { data: { username: id, nickname: nick, real_name: real, invite } } });
         if (error) {
           const m = String(error.message || "");
           if (/registered|exists/i.test(m)) return setMsg("이미 쓰고 있는 아이디예요.", true);
@@ -144,11 +162,13 @@
   async function onSession(session) {
     const prev = S.user && S.user.id;
     S.user = session ? session.user : null;
-    S.nickname = "";
+    S.nickname = ""; S.realName = ""; S.isAdmin = false;
     if (S.user) {
-      const { data } = await sb.from("profiles").select("nickname").eq("id", S.user.id).maybeSingle();
-      S.nickname = data ? data.nickname : "";
+      const { data } = await sb.rpc("my_profile");
+      const me = data && data[0];
+      if (me) { S.nickname = me.nickname; S.realName = me.real_name || ""; S.isAdmin = !!me.is_admin; }
     }
+    $("realbox").hidden = !(S.user && !S.realName);
     renderAccount();
     if ((S.user && S.user.id) !== prev) {
       if (S.user) await syncProgress();
@@ -156,6 +176,18 @@
       if (!$("p-rank").hidden) renderRank();
     }
   }
+
+  function myName() { return S.nickname ? S.nickname + (S.realName ? "(" + maskName(S.realName) + ")" : "") : ""; }
+
+  $("realform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const n = $("r-real").value.trim(), msg = $("r-real-msg");
+    if (!/^[가-힣]{2,5}$/.test(n)) { msg.textContent = "실명은 한글 2~5자로 적어주세요."; msg.className = "msg err"; return; }
+    const { error } = await sb.rpc("set_real_name", { n });
+    if (error) { msg.textContent = "등록하지 못했어요. 잠시 후 다시 시도해 주세요."; msg.className = "msg err"; return; }
+    S.realName = n; $("realbox").hidden = true; renderAccount();
+    if (!$("p-recall").hidden) renderRecall();
+  });
 
   /* ================= solving history ================= */
   function savePick(id, pick) {
@@ -300,14 +332,14 @@
         const r = await fetch("data/recalls.json", { cache: "no-cache" });
         if (r.ok) {
           const j = await r.json();
-          out.seed = (j.recalls || []).map((x) => Object.assign({ period: "", track: "전기", level: "", note: "", nickname: "" }, x));
+          out.seed = (j.recalls || []).map((x) => Object.assign({ period: "", track: "전기", level: "", note: "", writer: "" }, x));
           out.interviews = j.interviews || [];
         }
       } catch (e) {}
       if (sb) {
         const { data, error } = await sb.from("recalls_public")
-          .select("nickname,company,period,track,subject,topic,kind,level,note,status,created_at")
-          .neq("status", "rejected").order("created_at", { ascending: false }).limit(500);
+          .select("writer,company,period,track,subject,topic,kind,level,note,status,created_at")
+          .order("created_at", { ascending: false }).limit(500);
         if (error) out.liveFailed = true; else out.live = data || [];
       }
       out.all = out.live.concat(out.seed);
@@ -346,7 +378,7 @@
       el("div", { class: "chips" }, countBy(rs.map((r) => r.topic)).slice(0, 30).map(([k, n]) => el("span", { class: "chip" }, k, el("b", {}, String(n))))),
       el("h2", {}, "올라온 복기"),
       el("div", { class: "list" }, rs.slice(0, 30).map((r) => el("article", { class: "rec" },
-        el("div", { class: "meta" }, [r.company, r.period, r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : "", r.nickname ? "by " + r.nickname : ""].filter(Boolean).join(" · ")),
+        el("div", { class: "meta" }, [r.company, r.period, r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : "", r.writer ? "by " + r.writer : ""].filter(Boolean).join(" · ")),
         el("div", { class: "topic" }, r.topic),
         r.note ? el("div", { class: "note" }, r.note) : null))),
       rs.length > 30 ? el("p", { class: "muted" }, "최근 30건만 보여요. 위에서 기업을 고르면 그 기업 복기만 볼 수 있어요.") : null,
@@ -361,8 +393,9 @@
     const box = $("recallbox");
     const rules = el("ul", { class: "rules" },
       el("li", {}, el("b", {}, "문제 원문은 그대로 옮기지 마세요."), " 어떤 주제가 어떤 식으로 나왔는지만 적어주세요. 시험 문제는 출제기관 저작물이고, 유출 금지 서약을 받는 시험도 있어요."),
-      el("li", {}, "이름, 연락처, 수험번호 같은 개인정보는 적지 마세요. 남긴 내용은 닉네임과 함께 공개돼요."),
-      el("li", {}, "점수: 반영된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가 (매주 월요일 자동 반영)"));
+      el("li", {}, "올린 복기는 검사(운영자 확인 또는 매일 오전 9시 자동 검사)를 통과하면 닉네임(김*희)과 함께 공개돼요. 그 전에는 나만 보여요."),
+      el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 하루 10건까지예요."),
+      el("li", {}, "점수: 공개된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가"));
     if (!sb) { box.replaceChildren(el("div", { class: "empty" }, "지금은 복기를 받을 수 없어요. 잠시 후 다시 열어주세요.")); return; }
     if (!S.user) {
       const a = el("button", { type: "button", class: "btn" }, "로그인하고 복기 남기기");
@@ -371,14 +404,19 @@
       b.addEventListener("click", () => openAuth("signup"));
       box.replaceChildren(el("div", { class: "panel" },
         el("h2", {}, "시험 보고 왔다면 복기를 남겨주세요"),
-        el("p", {}, "남겨준 주제는 출제 경향에 바로 쌓이고, 매주 같은 유형의 새 문제로 만들어져요. 많이 남길수록 랭킹이 올라가요."),
+        el("p", {}, "남겨준 주제는 검사를 거쳐 출제 경향에 쌓이고, 같은 유형의 새 문제로 만들어져요. 많이 남길수록 랭킹이 올라가요."),
         rules, el("div", { class: "actions" }, a, b)));
+      return;
+    }
+    if (!S.realName) {
+      box.replaceChildren(el("div", { class: "panel" }, el("h2", {}, "실명을 먼저 등록해 주세요"),
+        el("p", {}, "복기를 올리려면 실명이 필요해요. 화면 위쪽의 '실명을 등록해 주세요' 칸에 적어주세요."), rules));
       return;
     }
     const f = {
       co: opts(el("select", { id: "r-co" }), COMPANIES), period: opts(el("select", { id: "r-period" }), PERIODS),
       track: opts(el("select", { id: "r-track" }), TRACKS),
-      sub: el("input", { id: "r-sub", list: "r-subs", maxlength: "30", placeholder: "예: 회로이론", autocomplete: "off" }),
+      sub: opts(el("select", { id: "r-sub" }), SUBS),
       topic: el("input", { id: "r-topic", maxlength: "80", placeholder: "예: RL 직렬회로 유효전력 계산 (원문 말고 주제만)", autocomplete: "off" }),
       kind: opts(el("select", { id: "r-kind" }), KINDS),
       level: opts(el("select", { id: "r-level" }), ["1", "2", "3", "4", "5"]),
@@ -391,29 +429,54 @@
     const submit = el("button", { class: "btn", type: "submit" }, "복기 올리기");
     const lab = (t, input, full) => el("div", { class: "field" + (full ? " full" : "") }, el("label", { for: input.id }, t), input);
     const form = el("form", { class: "panel grid2", novalidate: "" },
-      el("div", { class: "rule" }, el("b", {}, S.nickname), " 이름으로 올라가요. 문제 원문 말고 주제와 유형만 적어주세요."),
+      el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 문제 원문 말고 주제와 유형만 적어주세요."),
       lab("기업", f.co), lab("시험 시기", f.period), lab("직렬", f.track), lab("과목", f.sub),
-      el("datalist", { id: "r-subs" }, SUBS.map((s) => el("option", { value: s }))),
       lab("출제 주제", f.topic, true), lab("유형", f.kind), lab("체감 난이도 (1 쉬움 ~ 5 어려움)", f.level), lab("메모 (선택)", f.note, true),
       el("div", { class: "actions" }, submit, msg));
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const subject = f.sub.value.trim(), topic = f.topic.value.trim();
       msg.className = "msg";
-      if (!subject || topic.length < 2) { msg.textContent = "과목과 출제 주제(2자 이상)를 적어주세요."; msg.className = "msg err"; return; }
+      const bad = checkRecallText(topic, f.note.value.trim());
+      if (bad) { msg.textContent = bad; msg.className = "msg err"; return; }
       submit.disabled = true; msg.textContent = "올리는 중…";
       const row = { company: f.co.value, period: f.period.value, track: f.track.value, subject, topic, kind: f.kind.value, level: Number(f.level.value), note: f.note.value.trim() || null };
       const { error } = await sb.from("recalls").insert(row);
       submit.disabled = false;
-      if (error) { msg.textContent = /30건/.test(error.message) ? error.message : "올리지 못했어요. 잠시 후 다시 눌러주세요."; msg.className = "msg err"; return; }
+      if (error) { msg.textContent = /[가-힣]/.test(error.message || "") ? error.message : "올리지 못했어요. 잠시 후 다시 눌러주세요."; msg.className = "msg err"; return; }
       store.set("lastRecall", { co: row.company, period: row.period, track: row.track });
       f.topic.value = ""; f.note.value = "";
-      msg.textContent = "올렸어요! +1점. 다음 월요일에 문제로 만들어지면 +2점 더.";
+      msg.textContent = "올렸어요! 검사를 통과하면 공개되고 +1점, 문제로 만들어지면 +2점 더.";
       loadRecalls(true); loadMine(mine);
     });
     const mine = el("div", { class: "list" }, el("div", { class: "empty" }, "내 복기를 불러오는 중이에요…"));
-    box.replaceChildren(el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), rules), form, el("h2", {}, "내가 올린 복기"), mine);
+    const admin = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "검토할 복기를 불러오는 중이에요…")) : null;
+    box.replaceChildren(
+      ...(S.isAdmin ? [el("h2", {}, "운영자 검토 (공개 전 복기)"), admin] : []),
+      el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), rules), form, el("h2", {}, "내가 올린 복기"), mine);
     loadMine(mine);
+    if (admin) loadAdmin(admin);
+  }
+
+  async function loadAdmin(box) {
+    const { data, error } = await sb.rpc("admin_pending");
+    if (error) { box.replaceChildren(el("div", { class: "empty" }, "검토 목록을 불러오지 못했어요.")); return; }
+    if (!data.length) { box.replaceChildren(el("div", { class: "empty" }, "검토할 복기가 없어요. 새로 올라오면 여기에 떠요.")); return; }
+    box.replaceChildren(...data.map((r) => {
+      const act = (status) => async () => {
+        const { error: err } = await sb.rpc("admin_set_status", { rid: r.id, new_status: status });
+        if (!err) { loadRecalls(true); loadAdmin(box); }
+      };
+      const ok = el("button", { type: "button", class: "btn-line sm" }, "승인 (공개)");
+      ok.addEventListener("click", act("accepted"));
+      const no = el("button", { type: "button", class: "btn-ghost" }, "반려");
+      armButton(no, "반려", "한 번 더 누르면 반려돼요", act("rejected"));
+      return el("article", { class: "rec" },
+        el("div", { class: "meta" }, [r.real_name ? r.real_name + " (" + r.nickname + ")" : r.nickname, r.company, r.period, r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : ""].filter(Boolean).join(" · ")),
+        el("div", { class: "topic" }, r.topic),
+        r.note ? el("div", { class: "note" }, r.note) : null,
+        el("div", { class: "actions" }, ok, no));
+    }));
   }
 
   async function loadMine(box) {
@@ -443,7 +506,7 @@
   /* ================= ranking ================= */
   async function renderRank() {
     const box = $("rank");
-    const how = el("p", { class: "muted" }, "반영된 복기 1점 + 그 복기로 문제가 만들어지면 2점 추가. 문제 반영은 매주 월요일 오전 9시예요.");
+    const how = el("p", { class: "muted" }, "공개된 복기 1점 + 그 복기로 문제가 만들어지면 2점 추가. 자동 검사와 문제 반영은 매일 오전 9시예요.");
     if (!sb) { box.replaceChildren(el("div", { class: "empty" }, "지금은 랭킹을 불러올 수 없어요.")); return; }
     const { data, error } = await sb.rpc("get_ranking", { lim: 50 });
     if (error) { box.replaceChildren(el("div", { class: "empty" }, "랭킹을 불러오지 못했어요. 잠시 후 다시 열어주세요.")); return; }
@@ -457,10 +520,10 @@
     box.replaceChildren(
       el("h2", {}, "복기 랭킹"), how,
       el("div", { class: "tablewrap" }, el("table", { class: "rank" },
-        el("thead", {}, el("tr", {}, el("th", {}, "순위"), el("th", {}, "닉네임"), el("th", { class: "num" }, "복기"), el("th", { class: "num" }, "문제화"), el("th", { class: "num" }, "점수"))),
-        el("tbody", {}, data.map((r, i) => el("tr", { class: r.nickname === S.nickname ? "me" : "" },
+        el("thead", {}, el("tr", {}, el("th", {}, "순위"), el("th", {}, "이름"), el("th", { class: "num" }, "복기"), el("th", { class: "num" }, "문제화"), el("th", { class: "num" }, "점수"))),
+        el("tbody", {}, data.map((r, i) => el("tr", { class: r.name === myName() ? "me" : "" },
           el("td", {}, el("span", { class: "medal" }, i < 3 ? medal[i] + "위" : String(i + 1))),
-          el("td", {}, r.nickname + (r.nickname === S.nickname ? " (나)" : "")),
+          el("td", {}, r.name + (r.name === myName() ? " · 나" : "")),
           el("td", { class: "num" }, String(r.recalls)), el("td", { class: "num" }, String(r.used)), el("td", { class: "num" }, String(r.points)))))))
     );
   }
