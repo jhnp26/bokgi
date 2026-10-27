@@ -136,12 +136,13 @@
         if (!/^[가-힣]{2,5}$/.test(real)) return setMsg("실명은 한글 2~5자로 적어주세요.", true);
         if (!/^[가-힣A-Za-z0-9_ ]{1,12}$/.test(nick)) return setMsg("닉네임은 한글·영문·숫자로 1~12자예요.", true);
         if (BAD_WORDS.test(nick) || /(미친|운영자|관리자|admin)/i.test(nick)) return setMsg("쓸 수 없는 닉네임이에요.", true);
-        if (!invite) return setMsg("가입 코드를 적어주세요. 단톡방 공지에 있어요.", true);
         setMsg("확인하는 중…");
-        const inv = await sb.rpc("check_invite", { code: invite, rname: real });
-        if (inv.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
-        if (inv.data === "mismatch") return setMsg("이 개인 코드는 다른 실명으로 만들어졌어요. 실명을 정확히 적어주세요.", true);
-        if (inv.data !== "shared" && inv.data !== "personal") return setMsg("가입 코드가 맞지 않아요.", true);
+        if (invite) {
+          const inv = await sb.rpc("check_invite", { code: invite, rname: real });
+          if (inv.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
+          if (inv.data === "mismatch") return setMsg("이 개인 코드는 다른 실명으로 만들어졌어요. 실명을 정확히 적어주세요.", true);
+          if (inv.data !== "personal") return setMsg("개인 코드가 맞지 않아요. 코드가 없으면 칸을 비워두고 가입하세요.", true);
+        }
         const ok = await sb.rpc("username_available", { u: id });
         if (ok.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
         if (!ok.data) return setMsg("이미 쓰고 있는 아이디예요.", true);
@@ -527,14 +528,19 @@
         el("div", { class: "topic" }, m.real_name || "(실명 미등록)")
       ];
       const set = (ok) => async () => { const { error: err } = await sb.rpc("admin_verify", { uid: m.id, ok }); if (!err) loadMembers(box); };
+      const del = el("button", { type: "button", class: "btn-ghost" }, "회원 삭제");
+      armButton(del, "회원 삭제", "복기·기록까지 지워져요. 한 번 더 누르면 삭제", async () => {
+        const { error: err } = await sb.rpc("admin_delete_member", { uid: m.id });
+        if (!err) { loadRecalls(true); loadMembers(box); }
+      });
       if (!m.verified) {
         const b = el("button", { type: "button", class: "btn-line sm" }, "실명 확인");
         if (!m.real_name) b.disabled = true; else b.addEventListener("click", set(true));
-        kids.push(el("div", { class: "actions" }, b));
+        kids.push(el("div", { class: "actions" }, b, del));
       } else {
         const b = el("button", { type: "button", class: "btn-ghost" }, "확인 취소");
         armButton(b, "확인 취소", "한 번 더 누르면 취소돼요", set(false));
-        kids.push(el("div", { class: "actions" }, el("span", { class: "pill used" }, "확인됨"), b));
+        kids.push(el("div", { class: "actions" }, el("span", { class: "pill used" }, "확인됨"), b, del));
       }
       return el("article", { class: "rec" }, kids);
     };
