@@ -88,7 +88,20 @@
     if (S.user) {
       const out = el("button", { type: "button", class: "btn-ghost" }, "로그아웃");
       out.addEventListener("click", async () => { await sb.auth.signOut(); });
-      box.replaceChildren(el("span", {}, el("b", {}, myName() || "회원"), "님", S.isAdmin ? " · 운영자" : (S.realName && !S.verified ? " · 실명 확인 대기" : "")), out);
+      const me = el("button", { type: "button", class: "linkish", title: "내 계정 (비밀번호 변경·탈퇴)" }, el("b", {}, myName() || "회원"), "님");
+      me.addEventListener("click", () => { $("acctbox").hidden = !$("acctbox").hidden; });
+      const extra = [];
+      if (S.isAdmin) {
+        extra.push(" · 운영자");
+        const todo = (S.adminCounts || {});
+        const n = (todo.waiting_members || 0) + (todo.pending_recalls || 0) + (todo.open_reports || 0);
+        if (n) {
+          const go = el("button", { type: "button", class: "linkish", title: "확인 대기 " + (todo.waiting_members || 0) + "명 · 복기 검토 " + (todo.pending_recalls || 0) + "건 · 오류 신고 " + (todo.open_reports || 0) + "건" }, "할 일", el("span", { class: "count" }, String(n)));
+          go.addEventListener("click", () => showTab("recall"));
+          extra.push(" · ", go);
+        }
+      } else if (S.realName && !S.verified) extra.push(" · 실명 확인 대기");
+      box.replaceChildren(el("span", {}, me, ...extra), out);
     } else {
       const b = el("button", { type: "button", class: "btn-line sm" }, "로그인 / 회원가입");
       b.addEventListener("click", () => openAuth("login"));
@@ -106,7 +119,7 @@
     authMode = mode;
     $("mode-login").setAttribute("aria-pressed", String(mode === "login"));
     $("mode-signup").setAttribute("aria-pressed", String(mode === "signup"));
-    ["f-nick", "f-pw2", "f-real", "f-invite", "a-real-note"].forEach((id) => { $(id).hidden = mode !== "signup"; });
+    ["f-nick", "f-pw2", "f-real", "f-invite", "a-real-note", "a-privacy", "f-agree"].forEach((id) => { $(id).hidden = mode !== "signup"; });
     $("a-submit").textContent = mode === "signup" ? "가입하기" : "로그인";
     $("a-pw").setAttribute("autocomplete", mode === "signup" ? "new-password" : "current-password");
     setMsg("");
@@ -133,6 +146,7 @@
         if (pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return setMsg("비밀번호는 영문과 숫자를 섞어 8자 이상으로 만들어주세요.", true);
         if (pw.toLowerCase().includes(id)) return setMsg("비밀번호에 아이디를 넣지 마세요.", true);
         if (pw !== $("a-pw2").value) return setMsg("비밀번호 확인이 달라요.", true);
+        if (!$("a-agree").checked) return setMsg("개인정보 수집·이용에 동의해야 가입할 수 있어요.", true);
         if (!/^[가-힣]{2,5}$/.test(real)) return setMsg("실명은 한글 2~5자로 적어주세요.", true);
         if (!/^[가-힣A-Za-z0-9_ ]{1,12}$/.test(nick)) return setMsg("닉네임은 한글·영문·숫자로 1~12자예요.", true);
         if (BAD_WORDS.test(nick) || /(미친|운영자|관리자|admin)/i.test(nick)) return setMsg("쓸 수 없는 닉네임이에요.", true);
@@ -148,7 +162,7 @@
         if (!ok.data) return setMsg("이미 쓰고 있는 아이디예요.", true);
         const dup = await sb.from("profiles").select("id").eq("nickname", nick).limit(1);
         if (dup.data && dup.data.length) return setMsg("이미 쓰고 있는 닉네임이에요.", true);
-        const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw, options: { data: { username: id, nickname: nick, real_name: real, invite } } });
+        const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw, options: { data: { username: id, nickname: nick, real_name: real, invite, agree: "yes" } } });
         if (error) {
           const m = String(error.message || "");
           if (/registered|exists/i.test(m)) return setMsg("이미 쓰고 있는 아이디예요.", true);
@@ -173,7 +187,10 @@
       if (me) { S.nickname = me.nickname; S.realName = me.real_name || ""; S.isAdmin = !!me.is_admin; S.verified = !!me.verified; }
     }
     $("realbox").hidden = !(S.user && !S.realName);
+    if (!S.user) $("acctbox").hidden = true;
+    S.adminCounts = null;
     renderAccount();
+    if (S.isAdmin) refreshAdminCounts();
     if ((S.user && S.user.id) !== prev) {
       if (S.user) await syncProgress();
       if (!$("p-recall").hidden) renderRecall();
@@ -182,6 +199,26 @@
   }
 
   function myName() { return S.nickname ? S.nickname + (S.realName ? "(" + maskName(S.realName) + ")" : "") : ""; }
+
+  $("acct-close").addEventListener("click", () => { $("acctbox").hidden = true; });
+  $("pwform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = $("p-new").value, msg = $("p-msg");
+    msg.className = "msg err";
+    if (pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) { msg.textContent = "영문과 숫자를 섞어 8자 이상으로 만들어주세요."; return; }
+    if (pw !== $("p-new2").value) { msg.textContent = "비밀번호 확인이 달라요."; return; }
+    const { error } = await sb.auth.updateUser({ password: pw });
+    if (error) { msg.textContent = /same|different/i.test(error.message || "") ? "지금 비밀번호와 다른 비밀번호를 써주세요." : "바꾸지 못했어요. 다시 로그인한 뒤 시도해 주세요."; return; }
+    $("p-new").value = ""; $("p-new2").value = "";
+    msg.className = "msg"; msg.textContent = "비밀번호를 바꿨어요.";
+  });
+  armButton($("leave"), "회원 탈퇴", "정말 탈퇴할까요? 한 번 더 누르면 모두 지워져요", async () => {
+    const { error } = await sb.rpc("delete_my_account");
+    if (error) { $("leave-msg").textContent = /[가-힣]/.test(error.message || "") ? error.message : "탈퇴하지 못했어요."; return; }
+    try { localStorage.removeItem("bokgi:answers"); } catch (err) {}
+    await sb.auth.signOut();
+    $("acctbox").hidden = true;
+  });
 
   $("realform").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -280,7 +317,29 @@
       again.addEventListener("click", () => { clearPick(p.id); renderProblems(); });
       foot.push(again);
     }
-    if (reveal && CFG.reportUrl) foot.push(el("a", { class: "btn-ghost", href: CFG.reportUrl, target: "_blank", rel: "noopener" }, p.id + " 오류 신고"));
+    let reportBox = null;
+    if (reveal) {
+      const rb = el("button", { type: "button", class: "btn-ghost" }, "오류 신고");
+      foot.push(rb);
+      reportBox = el("div", { class: "reportbox", hidden: "" });
+      rb.addEventListener("click", () => {
+        if (!S.user) { openAuth("login"); return; }
+        if (!reportBox.hidden) { reportBox.hidden = true; return; }
+        const why = el("select", { "aria-label": "신고 이유" }, ["정답이 틀림", "해설이 틀림", "문제·보기가 이상함", "기타"].map((v) => el("option", { value: v }, v)));
+        const note = el("input", { maxlength: "300", placeholder: "어디가 이상한지 짧게 (선택)", "aria-label": "신고 내용" });
+        const send = el("button", { type: "button", class: "btn sm" }, "보내기");
+        const msg = el("span", { class: "msg", role: "status" });
+        send.addEventListener("click", async () => {
+          send.disabled = true;
+          const { error } = await sb.from("reports").insert({ problem_id: p.id, reason: why.value, note: note.value.trim() || null });
+          send.disabled = false;
+          if (error) { msg.textContent = /[가-힣]/.test(error.message || "") ? error.message : "보내지 못했어요. 잠시 후 다시 해주세요."; msg.className = "msg err"; return; }
+          reportBox.replaceChildren(el("span", { class: "msg" }, "신고했어요. 운영자가 확인하고 고칠게요. 고마워요!"));
+        });
+        reportBox.replaceChildren(el("b", {}, p.id), why, note, send, msg);
+        reportBox.hidden = false;
+      });
+    }
     return el("article", { class: "q" },
       el("div", { class: "meta" },
         el("span", { class: "qid" }, label),
@@ -294,7 +353,8 @@
         chosen === undefined ? el("span", { class: "no" }, "안 푼 문제예요. 정답은 " + (p.answer + 1) + "번. ")
           : chosen === p.answer ? el("span", { class: "ok" }, "정답이에요. ") : el("span", { class: "no" }, "오답이에요. 정답은 " + (p.answer + 1) + "번. "),
         p.explain || "") : null,
-      foot.length ? el("div", { class: "qfoot" }, foot) : null
+      foot.length ? el("div", { class: "qfoot" }, foot) : null,
+      reportBox
     );
   }
 
@@ -463,13 +523,42 @@
     const admin = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "검토할 복기를 불러오는 중이에요…")) : null;
     const members = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "회원 목록을 불러오는 중이에요…")) : null;
     const codes = S.isAdmin ? el("div", { class: "list" }) : null;
+    const reports = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "신고를 불러오는 중이에요…")) : null;
     box.replaceChildren(
-      ...(S.isAdmin ? [el("h2", {}, "운영자 · 개인 가입 코드"), codes, el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin] : []),
+      ...(S.isAdmin ? [el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin,
+                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
       el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), rules), form, el("h2", {}, "내가 올린 복기"), mine);
     loadMine(mine);
     if (admin) loadAdmin(admin);
     if (members) loadMembers(members);
     if (codes) loadCodes(codes);
+    if (reports) loadReports(reports);
+    if (S.isAdmin) refreshAdminCounts();
+  }
+
+  async function refreshAdminCounts() {
+    if (!S.isAdmin) return;
+    const { data } = await sb.rpc("admin_counts");
+    S.adminCounts = data && data[0];
+    renderAccount();
+  }
+
+  async function loadReports(box) {
+    const { data, error } = await sb.rpc("admin_reports");
+    if (error) { box.replaceChildren(el("div", { class: "empty" }, "신고를 불러오지 못했어요.")); return; }
+    if (!data.length) { box.replaceChildren(el("div", { class: "empty" }, "새 오류 신고가 없어요.")); return; }
+    box.replaceChildren(
+      el("p", { class: "muted" }, "Claude에게 \"오류 신고 확인해줘\"라고 하면 문제를 고쳐서 올려요. 고친 뒤 '해결'을 눌러주세요."),
+      ...data.map((r) => {
+        const prob = S.problems.find((x) => x.id === r.problem_id);
+        const done = el("button", { type: "button", class: "btn-line sm" }, "해결");
+        done.addEventListener("click", async () => { const { error: err } = await sb.rpc("admin_resolve_report", { rid: r.id }); if (!err) { loadReports(box); refreshAdminCounts(); } });
+        return el("article", { class: "rec" },
+          el("div", { class: "meta" }, [r.problem_id, prob ? prob.subject + " · " + prob.topic : "", r.reason, "by " + r.nickname, new Date(r.created_at).toLocaleDateString("ko-KR")].filter(Boolean).join(" · ")),
+          el("div", { class: "topic" }, prob ? prob.q.slice(0, 80) + (prob.q.length > 80 ? "…" : "") : "(지금은 없는 문제)"),
+          r.note ? el("div", { class: "note" }, r.note) : null,
+          el("div", { class: "actions" }, done));
+      }));
   }
 
   async function loadCodes(box) {
@@ -528,6 +617,13 @@
         el("div", { class: "topic" }, m.real_name || "(실명 미등록)")
       ];
       const set = (ok) => async () => { const { error: err } = await sb.rpc("admin_verify", { uid: m.id, ok }); if (!err) loadMembers(box); };
+      const tmp = el("button", { type: "button", class: "btn-ghost" }, "임시 비밀번호");
+      const tmpOut = el("span", { class: "msg", role: "status" });
+      armButton(tmp, "임시 비밀번호", "한 번 더 누르면 비밀번호가 바뀌어요", async () => {
+        const { data: pw, error: err } = await sb.rpc("admin_reset_password", { uid: m.id });
+        if (err) { tmpOut.textContent = "바꾸지 못했어요."; return; }
+        tmpOut.replaceChildren("임시 비밀번호: ", el("b", {}, pw), " (본인에게 1:1로 알려주고, 로그인 후 바꾸라고 해주세요)");
+      });
       const del = el("button", { type: "button", class: "btn-ghost" }, "회원 삭제");
       armButton(del, "회원 삭제", "복기·기록까지 지워져요. 한 번 더 누르면 삭제", async () => {
         const { error: err } = await sb.rpc("admin_delete_member", { uid: m.id });
@@ -536,11 +632,11 @@
       if (!m.verified) {
         const b = el("button", { type: "button", class: "btn-line sm" }, "실명 확인");
         if (!m.real_name) b.disabled = true; else b.addEventListener("click", set(true));
-        kids.push(el("div", { class: "actions" }, b, del));
+        kids.push(el("div", { class: "actions" }, b, tmp, del), tmpOut);
       } else {
         const b = el("button", { type: "button", class: "btn-ghost" }, "확인 취소");
         armButton(b, "확인 취소", "한 번 더 누르면 취소돼요", set(false));
-        kids.push(el("div", { class: "actions" }, el("span", { class: "pill used" }, "확인됨"), b, del));
+        kids.push(el("div", { class: "actions" }, el("span", { class: "pill used" }, "확인됨"), b, tmp, del), tmpOut);
       }
       return el("article", { class: "rec" }, kids);
     };

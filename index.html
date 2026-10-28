@@ -40,10 +40,33 @@
       <div class="field" id="f-real" hidden><label for="a-real">실명</label><input id="a-real" maxlength="5" placeholder="한글 2~5자" autocomplete="name"></div>
       <div class="field" id="f-nick" hidden><label for="a-nick">닉네임</label><input id="a-nick" maxlength="12" placeholder="1~12자"></div>
       <div class="field" id="f-invite" hidden><label for="a-invite">개인 코드 (받았다면)</label><input id="a-invite" maxlength="20" placeholder="없으면 비워두세요" autocomplete="off"></div>
+      <details class="full privacy" id="a-privacy" hidden>
+        <summary>개인정보 수집·이용 안내 (펼쳐 보기)</summary>
+        <ul class="rules">
+          <li><b>수집 항목</b>: 아이디, 비밀번호(암호화 저장), 실명, 닉네임, 내가 올린 복기·풀이 기록·오류 신고</li>
+          <li><b>목적</b>: 회원 구분, 복기 작성자 확인(장난 방지), 랭킹 표시, 풀이 기록 이어보기</li>
+          <li><b>공개 범위</b>: 사이트에는 닉네임과 가린 실명(김*희)만 보여요. 전체 실명과 아이디는 운영자만 볼 수 있어요.</li>
+          <li><b>보관 기간</b>: 탈퇴하면 위 정보를 바로 모두 지워요. 탈퇴는 로그인 후 내 이름을 눌러서 할 수 있어요.</li>
+          <li>동의하지 않으면 가입할 수 없지만, 문제 풀기와 모의고사는 로그인 없이도 쓸 수 있어요.</li>
+        </ul>
+      </details>
+      <label class="check full" id="f-agree" hidden><input type="checkbox" id="a-agree"> 위 개인정보 수집·이용에 동의해요 (필수)</label>
       <div class="actions"><button class="btn" id="a-submit" type="submit">로그인</button><span class="msg" id="a-msg" role="status"></span></div>
       <p class="muted full" id="a-note">이메일 인증이 없어서 비밀번호를 잊으면 스스로 찾을 수 없어요. 운영자에게 초기화를 요청하세요.</p>
       <p class="muted full" id="a-real-note" hidden>사이트에는 <b>닉네임(김*희)</b>처럼 실명 가운데를 가려서 보여주고, 전체 실명은 운영자만 볼 수 있어요. 문제 풀기와 모의고사는 가입하자마자 쓸 수 있고, 복기 올리기와 랭킹은 운영자가 실명을 확인한 뒤에 열려요. 운영자에게 1:1로 받은 개인 코드가 있으면 바로 확인돼요.</p>
     </form>
+  </div>
+
+  <div class="panel" id="acctbox" hidden>
+    <div class="authtabs"><h2>내 계정</h2><button type="button" class="btn-ghost close" id="acct-close">닫기</button></div>
+    <form id="pwform" class="actions" novalidate>
+      <input id="p-new" type="password" autocomplete="new-password" placeholder="새 비밀번호 (영문+숫자 8자 이상)" aria-label="새 비밀번호">
+      <input id="p-new2" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" aria-label="새 비밀번호 확인">
+      <button class="btn sm" type="submit">비밀번호 바꾸기</button>
+      <span class="msg" id="p-msg" role="status"></span>
+    </form>
+    <div class="actions"><button type="button" class="btn-ghost" id="leave">회원 탈퇴</button><span class="msg" id="leave-msg" role="status"></span></div>
+    <p class="muted">탈퇴하면 실명·닉네임·복기·풀이 기록·신고가 바로 모두 지워지고 되돌릴 수 없어요.</p>
   </div>
 
   <div class="panel" id="realbox" hidden>

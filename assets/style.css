@@ -118,6 +118,15 @@ input:focus-visible,textarea:focus-visible{outline:2px solid var(--omr);outline-
 .pill.accepted{background:var(--omr-soft);color:var(--omr)}
 .pill.rejected{background:var(--bad-soft);color:var(--bad)}
 
+.check{display:flex;gap:8px;align-items:center;font-size:14px;cursor:pointer}
+.check input{width:18px;height:18px;accent-color:var(--omr)}
+.privacy summary{cursor:pointer;font-size:13.5px;color:var(--muted)}
+.privacy .rules{margin-top:8px;font-size:13px}
+.account .linkish{font:inherit;background:none;border:0;padding:0;color:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.count{display:inline-block;font-family:var(--f-num);font-size:12px;background:var(--omr);color:var(--on-accent);border-radius:999px;padding:0 7px;margin-left:4px}
+.reportbox{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-top:1px dashed var(--line);padding-top:10px}
+.reportbox input{flex:1 1 180px}
+
 /* ranking */
 .rank{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-variant-numeric:tabular-nums}
 .rank th,.rank td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:14px}
