@@ -257,12 +257,23 @@ def valid(p):
             and isinstance(p.get("explain"), str) and 10 <= len(p["explain"]) <= 1500)
 
 
-def make_problem(rec, ask):
+def similar_existing(subject, bank, limit=20):
+    """같은 과목에 이미 있는 문제 요약. AI가 숫자·조건이 겹치는 중복 문제를 만들지 않게 보여준다."""
+    same = [p for p in bank if p.get("subject") == subject]
+    return "\n".join("- " + re.sub(r"\s+", " ", p.get("q", ""))[:90] for p in same[-limit:])
+
+
+def make_problem(rec, ask, bank=()):
     """(문제, None) 또는 (None, (상태, 사유))."""
     info = "\n".join("%s: %s" % (k, str(rec[k])[:400]) for k in FIELDS if rec.get(k))
+    existing = similar_existing(rec.get("subject"), bank)
+    user = "<복기>\n%s\n</복기>" % info
+    if existing:
+        user += ("\n\n<이미 있는 문제>\n%s\n</이미 있는 문제>\n위 문제들과 숫자·조건·묻는 방식이 겹치지 않는 새 문제를 만들어라."
+                 % existing)
     for _ in range(2):
         p = parse_json(ask([{"role": "system", "content": GEN_SYSTEM},
-                            {"role": "user", "content": "<복기>\n%s\n</복기>" % info}]))
+                            {"role": "user", "content": user}]))
         if not p.get("ok"):
             return None, ("rejected", "AI 판단: " + str(p.get("reason", "필기 주제로 보기 어려워요"))[:80])
         if not valid(p):
@@ -362,7 +373,7 @@ def main():
             finish(rec, status, None, reason)
             continue
         try:
-            p, why = make_problem(rec, ask)
+            p, why = make_problem(rec, ask, bank["problems"])
         except AIUnavailable as e:
             log["note"] = "AI 사용 불가로 중단 (다음 실행 때 이어서): " + str(e)[:200]
             print(log["note"])
