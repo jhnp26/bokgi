@@ -1,15 +1,17 @@
 {
-  "lastRun": "2026-10-27T00:29:34+00:00",
+  "lastRun": "2026-10-28T00:38:04+00:00",
   "added": [
-    "MC-46",
-    "EM-30",
-    "EM-31",
-    "PW-31",
-    "EM-32",
-    "EM-33",
-    "MC-47"
+    "MC-48",
+    "PW-32",
+    "PW-33",
+    "MC-49",
+    "MC-50",
+    "MC-51",
+    "MC-52",
+    "NU-02",
+    "EM-34"
   ],
   "member": 0,
-  "seeds": 8,
-  "note": "AI 사용 불가로 중단 (다음 실행 때 이어서): gemini-3.1-flash-lite: HTTP 503 [{ \"error\": { \"code\": 503, \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\", \"stat"
+  "seeds": 10,
+  "note": ""
 }
