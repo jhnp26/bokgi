@@ -41,6 +41,8 @@ jobs:
           BOKGI_BOT_TOKEN: ${{ secrets.BOKGI_BOT_TOKEN }}
           BOKGI_LIMIT: ${{ inputs.limit || 10 }}
         run: python tools/generate.py ${{ inputs.selftest && '--selftest' || '' }}
+      - name: 문제 은행 점검 (깨진 보기·중복·LaTeX)
+        run: python tools/check_bank.py || echo "::warning::문제 은행에 손볼 문제가 있어요 (위 목록 참고)"
       - name: 결과 저장
         if: ${{ !inputs.selftest }}
         run: |

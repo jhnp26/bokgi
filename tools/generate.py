@@ -257,6 +257,26 @@ def valid(p):
             and isinstance(p.get("explain"), str) and 10 <= len(p["explain"]) <= 1500)
 
 
+def numbers_in(text):
+    """문제 속 숫자 조건. '3상', '1차' 같은 데서 나오는 1·2·3은 빼고 본다."""
+    nums = set(re.findall(r"\d+(?:\.\d+)?", (text or "").replace(",", "")))
+    return nums - {"1", "2", "3"}
+
+
+def is_duplicate(p, subject, bank):
+    """같은 과목에 문제 글이 같거나, 숫자 조건이 모두 같은(숫자 2개 이상) 문제가 이미 있으면 중복."""
+    q = re.sub(r"\s+", "", p.get("q", ""))
+    nums = numbers_in(p.get("q"))
+    for o in bank:
+        if o.get("subject") != subject:
+            continue
+        if re.sub(r"\s+", "", o.get("q", "")) == q:
+            return True
+        if len(nums) >= 2 and numbers_in(o.get("q")) == nums:
+            return True
+    return False
+
+
 def similar_existing(subject, bank, limit=20):
     """같은 과목에 이미 있는 문제 요약. AI가 숫자·조건이 겹치는 중복 문제를 만들지 않게 보여준다."""
     same = [p for p in bank if p.get("subject") == subject]
@@ -281,7 +301,9 @@ def make_problem(rec, ask, bank=()):
         p["q"], p["explain"] = plain(p["q"]), plain(p["explain"])
         p["choices"] = [plain(c) for c in p["choices"]]
         p["choices"] = [re.sub(r"^\s*[1-4①-④][.)]\s*", "", c) for c in p["choices"]]
-        if re.search(r"그림과 같|아래 그림|다음 그림|표와 같", p["q"]):
+        if not valid(p) or re.search(r"그림과 같|아래 그림|다음 그림|표와 같", p["q"]):
+            continue                    # 기호 정리 후 보기가 겹치거나 깨진 경우 포함
+        if is_duplicate(p, rec.get("subject"), bank):
             continue
         listing = "\n".join("%d) %s" % (i, c) for i, c in enumerate(p["choices"]))
         v = parse_json(ask([{"role": "system", "content": VERIFY_SYSTEM},
