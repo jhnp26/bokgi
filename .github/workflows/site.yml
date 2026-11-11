@@ -49,7 +49,14 @@ jobs:
           git config user.name "bokgi-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/
-          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          if git diff --cached --quiet; then
+            # GitHub은 60일 동안 커밋이 없으면 예약 실행(매일 생성·DB 깨우기)을 꺼버려요.
+            # 마지막 커밋이 25일 넘었으면 작동 기록을 하나 남겨서 계속 돌아가게 해요.
+            age=$(( $(date +%s) - $(git log -1 --format=%ct) ))
+            if [ "$age" -lt 2160000 ]; then echo "변경 없음"; exit 0; fi
+            date -u +'{"alive": "%Y-%m-%dT%H:%M:%SZ"}' > data/alive.json
+            git add data/alive.json
+          fi
           git commit -m "매일 자동 점검: 복기 기반 문제 생성"
           git pull --rebase
           git push

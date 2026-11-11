@@ -178,7 +178,37 @@ def chat(messages):
                 break
             print("  잠시 후 다시 시도 (%ss): %s" % (wait, err[:100]))
             time.sleep(wait)
+    if not _discovered[0]:
+        # 적어 둔 모델이 모두 막혔으면 (구글이 모델을 없앤 경우 등) 지금 쓸 수 있는 flash 모델을 찾아서 한 번 더 시도
+        _discovered[0] = True
+        try:
+            extra = discover_models(key)
+        except (urllib.error.URLError, ValueError, KeyError, TimeoutError, OSError) as e:
+            extra = []
+            errors.append("모델 목록 조회 실패: %s" % e)
+        if extra:
+            print("  적어 둔 모델이 막혀서 새 모델로 시도:", ", ".join(extra))
+            MODELS.extend(extra)
+            return chat(messages)
     raise AIUnavailable(" | ".join(errors) or "사용할 수 있는 모델이 없음")
+
+
+_discovered = [False]
+
+
+def discover_models(key):
+    """구글이 지금 제공하는 flash 계열 모델을 최신 버전부터 고른다."""
+    url = GEMINI_URL.rsplit("/chat/completions", 1)[0] + "/models"
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        ids = [str(m.get("id", "")).split("/")[-1] for m in json.loads(r.read().decode("utf-8")).get("data", [])]
+    pick = [i for i in ids if "flash" in i and i not in MODELS
+            and not re.search(r"image|tts|audio|live|embed|vision|thinking", i)]
+
+    def rank(i):
+        nums = [int(x) for x in re.findall(r"\d+", i)][:2]
+        return ("preview" not in i and "exp" not in i, "lite" not in i, nums)
+    return sorted(pick, key=rank, reverse=True)[:4]
 
 
 def fake_chat(messages):
