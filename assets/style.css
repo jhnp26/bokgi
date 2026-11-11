@@ -157,3 +157,21 @@ footer p{margin:0}
 
 @media (max-width:560px){h1{font-size:24px} .q{padding:16px 14px} .grid2{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:no-preference){.choice,.tab{transition:background-color .15s,color .15s}}
+
+/* 복기 여러 줄 입력 */
+.rhead{font-size:15px;margin:4px 0 0}
+.rrows{display:flex;flex-direction:column;gap:8px}
+.rrow{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+.rline{display:grid;grid-template-columns:minmax(0,10em) minmax(0,1fr) auto;gap:8px;align-items:center}
+.rline2{display:grid;grid-template-columns:minmax(0,10em) minmax(0,1fr);gap:8px}
+.rrow .msg:empty{display:none}
+.btn-ghost.del{font-size:18px;line-height:1;padding:6px 11px}
+button.chip.pick{font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer}
+button.chip.pick:hover{background:var(--omr-soft);border-color:var(--omr)}
+@media (max-width:560px){
+  .rline{grid-template-columns:minmax(0,1fr) auto}
+  .rline select{grid-column:1;grid-row:1}
+  .rline .del{grid-column:2;grid-row:1}
+  .rline input{grid-column:1/-1;grid-row:2}
+  .rline2{grid-template-columns:minmax(0,1fr)}
+}

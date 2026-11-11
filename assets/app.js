@@ -51,6 +51,67 @@
     return "";
   }
   const KINDS = ["계산", "개념·정의", "그래프·회로 해석", "법규·상식", "기타"];
+  // 복기 입력 도우미: 주제 글자를 보고 과목·유형을 짐작해요 (회원이 직접 고르면 그대로 둬요)
+  const nrm = (t) => (t || "").toLowerCase().replace(/\s+/g, "");
+  function buildGuess(recs) {
+    const exact = new Map(), tok = new Map();
+    const add = (subject, topic) => {
+      if (!subject || !topic || !SUBS.includes(subject)) return;
+      exact.set(nrm(topic), subject);
+      for (const w of String(topic).split(/[\s·,()/\[\]]+/)) {
+        const t = w.replace(/(에서|으로|의|을|를|이|가|은|는|에|과|와|로)$/, "");
+        if (t.length < 2 || /^[\d.%]+$/.test(t)) continue;
+        const m = tok.get(t) || {}; m[subject] = (m[subject] || 0) + 1; tok.set(t, m);
+      }
+    };
+    S.problems.forEach((p) => { add(p.subject, p.topic); add(p.subject, p.fromTopic); });
+    recs.forEach((r) => add(r.subject, r.topic));
+    return (text) => {
+      const n = nrm(text);
+      if (n.length < 2) return "";
+      if (exact.has(n)) return exact.get(n);
+      const score = {};
+      for (const [t, m] of tok) {
+        if (!text.includes(t)) continue;
+        const tot = Object.values(m).reduce((a, b) => a + b, 0);
+        for (const k in m) score[k] = (score[k] || 0) + t.length * m[k] / tot;
+      }
+      let best = "", bs = 1.5;
+      for (const k in score) if (score[k] > bs) { best = k; bs = score[k]; }
+      if (best) return best;
+      for (const [k, re] of SUBJ_WORDS) if (re.test(text)) return k;
+      return "";
+    };
+  }
+  const SUBJ_WORDS = [
+    ["제어공학", /근궤적|전달함수|나이퀴스트|보드선도|안정도|라플라스|블록선도|PID|과도응답|정상편차|상태방정식|시퀀스|논리회로/i],
+    ["전기설비", /KEC|접지|전선|케이블|배선|누전|분전반|간선|전기설비/i],
+    ["전기자기학", /전계|자계|정전용량|유전체|맥스웰|가우스|쿨롱|자속|전위|자성체|전자유도|정전에너지/],
+    ["전기기기", /변압기|발전기|전동기|유도기|동기기|직류기|정류기|여자|전기자|슬립/],
+    ["전력공학", /송전|배전|단락|코로나|피뢰기|차단기|조상|중성점|전압강하|선로|수력|화력|원자력|보호계전/],
+    ["회로이론", /공진|임피던스|테브난|노턴|과도현상|RLC|RL|RC|역률|유효전력|무효전력|키르히호프|브리지|대칭좌표/i],
+    ["한국사", /조선|고려|신라|백제|고구려|독립|왕|조약|전쟁/],
+    ["회사상식", /인재상|비전|미션|경영|핵심가치|사업|원전|한수원|한전/]
+  ];
+  function guessKind(t) {
+    if (/계산|값|크기|몇|얼마|산출/.test(t)) return "계산";
+    if (/그래프|파형|선도|궤적|회로도|보드|나이퀴스트|벡터도/.test(t)) return "그래프·회로 해석";
+    if (/사업법|관리법|법규|법령|규정|기술기준|kec|접지|안전|한국사|상식|역사|인물|비전|인재상/i.test(t)) return "법규·상식";
+    return t.trim().length >= 4 ? "개념·정의" : "";
+  }
+  // 출제 경향의 '나도 나왔어요' → 복기 입력칸에 담아두기
+  function addToDraft(r) {
+    const d = store.get("recallDraft", null) || {};
+    d.rows = (d.rows || []).filter((x) => (x.topic || "").trim());
+    if (!d.rows.length) {
+      if (COMPANIES.includes(r.company)) d.co = r.company;
+      if (PERIODS.includes(r.period)) d.period = r.period;
+    }
+    if (!d.rows.some((x) => nrm(x.topic) === nrm(r.topic)))
+      d.rows.push({ subject: SUBS.includes(r.subject) ? r.subject : "", kind: KINDS.includes(r.kind) ? r.kind : "", topic: r.topic, note: "", ms: true });
+    store.set("recallDraft", d);
+    showTab("recall");
+  }
   const STATUS = { pending: ["검사 대기 · 나만 보여요", ""], accepted: ["반영됨", "accepted"], used: ["문제로 만들어짐", "used"], rejected: ["반영 안 됨", "rejected"] };
 
   let sb = null;
@@ -413,6 +474,11 @@
   }
 
   /* ================= trend ================= */
+  function meToo(r) {
+    const b = el("button", { type: "button", class: "btn-line sm", title: "내 복기 입력칸에 이 주제를 담아요" }, "나도 나왔어요 +");
+    b.addEventListener("click", () => addToDraft(r));
+    return el("div", { class: "actions" }, b);
+  }
   let trendCompany = "";
   async function renderTrend() {
     const box = $("trend");
@@ -444,7 +510,8 @@
       el("div", { class: "list" }, rs.slice(0, 30).map((r) => el("article", { class: "rec" },
         el("div", { class: "meta" }, [r.company, r.period, r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : "", r.writer ? "by " + r.writer : ""].filter(Boolean).join(" · ")),
         el("div", { class: "topic" }, r.topic),
-        r.note ? el("div", { class: "note" }, r.note) : null))),
+        r.note ? el("div", { class: "note" }, r.note) : null,
+        sb ? meToo(r) : null))),
       rs.length > 30 ? el("p", { class: "muted" }, "최근 30건만 보여요. 위에서 기업을 고르면 그 기업 복기만 볼 수 있어요.") : null,
       ivs.length ? el("h2", {}, "면접 기출") : null,
       ivs.length ? el("div", { class: "panel" }, el("ul", { class: "rules" }, ivs.map((q) => el("li", {}, el("b", {}, q.company), " · ", q.q)))) : null
@@ -452,13 +519,17 @@
   }
 
   /* ================= recall submit ================= */
+  function draftHint() {
+    const n = ((store.get("recallDraft", null) || {}).rows || []).filter((x) => (x.topic || "").trim()).length;
+    return n ? el("p", { class: "rule" }, "담아둔 주제 " + n + "개가 있어요. 로그인하면 바로 올릴 수 있어요.") : null;
+  }
   function opts(sel, items) { sel.replaceChildren(...items.map((v) => el("option", { value: v }, v))); return sel; }
   async function renderRecall() {
     const box = $("recallbox");
     const rules = el("ul", { class: "rules" },
       el("li", {}, el("b", {}, "문제 원문은 그대로 옮기지 마세요."), " 어떤 주제가 어떤 식으로 나왔는지만 적어주세요. 시험 문제는 출제기관 저작물이고, 유출 금지 서약을 받는 시험도 있어요."),
       el("li", {}, "올린 복기는 검사(운영자 확인 또는 매일 오전 9시 자동 검사)를 통과하면 닉네임(김*희)과 함께 공개돼요. 그 전에는 나만 보여요."),
-      el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 하루 10건까지예요."),
+      el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 하루 25건까지예요."),
       el("li", {}, "점수: 공개된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가"));
     if (!sb) { box.replaceChildren(el("div", { class: "empty" }, "지금은 복기를 받을 수 없어요. 잠시 후 다시 열어주세요.")); return; }
     if (!S.user) {
@@ -469,7 +540,7 @@
       box.replaceChildren(el("div", { class: "panel" },
         el("h2", {}, "시험 보고 왔다면 복기를 남겨주세요"),
         el("p", {}, "남겨준 주제는 검사를 거쳐 출제 경향에 쌓이고, 같은 유형의 새 문제로 만들어져요. 많이 남길수록 랭킹이 올라가요."),
-        rules, el("div", { class: "actions" }, a, b)));
+        rules, draftHint(), el("div", { class: "actions" }, a, b)));
       return;
     }
     if (!S.realName) {
@@ -483,41 +554,144 @@
         el("p", { class: "muted" }, "오래 걸리면 단톡방에서 운영자에게 아이디를 알려주세요."), rules));
       return;
     }
-    const f = {
+    const draft = store.get("recallDraft", null) || {};
+    const last = store.get("lastRecall", {});
+    const sh = {
       co: opts(el("select", { id: "r-co" }), COMPANIES), period: opts(el("select", { id: "r-period" }), PERIODS),
       track: opts(el("select", { id: "r-track" }), TRACKS),
-      sub: opts(el("select", { id: "r-sub" }), SUBS),
-      topic: el("input", { id: "r-topic", maxlength: "80", placeholder: "예: RL 직렬회로 유효전력 계산 (원문 말고 주제만)", autocomplete: "off" }),
-      kind: opts(el("select", { id: "r-kind" }), KINDS),
-      level: opts(el("select", { id: "r-level" }), ["1", "2", "3", "4", "5"]),
-      note: el("textarea", { id: "r-note", maxlength: "1000", placeholder: "어떤 식으로 물었는지, 함정 보기, 시간 배분 팁 등" })
+      level: el("select", { id: "r-level" }, [["1", "1 쉬움"], ["2", "2"], ["3", "3 보통"], ["4", "4"], ["5", "5 어려움"]].map(([v, t]) => el("option", { value: v }, t)))
     };
-    f.level.value = "3";
-    const last = store.get("lastRecall", {});
-    if (last.co) f.co.value = last.co; if (last.period) f.period.value = last.period; if (last.track) f.track.value = last.track;
+    sh.level.value = draft.level || "3";
+    for (const k of ["co", "period", "track"]) {
+      const v = draft[k] || last[k];
+      if (v && [...sh[k].options].some((o) => o.value === v)) sh[k].value = v;
+    }
+    let guess = buildGuess([]), recs = [];
+    const subjOf = new Map();
+    const rowsBox = el("div", { class: "rrows" });
+    const topicList = el("datalist", { id: "r-topics" });
+    const rows = () => [...rowsBox.children];
+    function saveDraft() {
+      store.set("recallDraft", {
+        co: sh.co.value, period: sh.period.value, track: sh.track.value, level: sh.level.value,
+        rows: rows().map((r) => ({ subject: r._f.sub.value, kind: r._f.kind.value, topic: r._f.topic.value, note: r._f.note.value, ms: !!r._f.sub.dataset.manual }))
+          .filter((x) => x.topic.trim() || x.note.trim())
+      });
+    }
+    function autoFill(f) {
+      const t = f.topic.value;
+      if (!f.sub.dataset.manual) f.sub.value = subjOf.get(t.trim()) || guess(t) || "";
+      if (!f.kind.dataset.manual) { const k = guessKind(t); if (k) f.kind.value = k; }
+    }
+    function nextRow(row) {
+      const nx = row.nextElementSibling;
+      if (nx) nx._f.topic.focus(); else addRow(null, true);
+    }
+    function addRow(v, focus) {
+      v = v || {};
+      const f = {
+        sub: el("select", { "aria-label": "과목" }, el("option", { value: "" }, "과목 고르기"), SUBS.map((x) => el("option", { value: x }, x))),
+        topic: el("input", { maxlength: "80", placeholder: "예: RL 직렬회로 유효전력 계산", autocomplete: "off", list: "r-topics", enterkeyhint: "next", "aria-label": "출제 주제" }),
+        kind: opts(el("select", { "aria-label": "유형" }), KINDS),
+        note: el("input", { maxlength: "300", placeholder: "메모 (선택): 물어본 방식, 함정 보기 등", autocomplete: "off", enterkeyhint: "next", "aria-label": "메모" }),
+        err: el("div", { class: "msg err", role: "status" })
+      };
+      const del = el("button", { type: "button", class: "btn-ghost del", title: "이 줄 지우기", "aria-label": "이 줄 지우기" }, "×");
+      const row = el("div", { class: "rrow" }, el("div", { class: "rline" }, f.sub, f.topic, del), el("div", { class: "rline2" }, f.kind, f.note), f.err);
+      row._f = f;
+      f.topic.value = v.topic || ""; f.note.value = v.note || "";
+      if (v.subject) { f.sub.value = v.subject; if (v.ms) f.sub.dataset.manual = "1"; }
+      if (v.kind && KINDS.includes(v.kind)) { f.kind.value = v.kind; if (v.ms) f.kind.dataset.manual = "1"; }
+      if (!v.subject && f.topic.value) autoFill(f);
+      f.topic.addEventListener("input", () => { autoFill(f); f.err.textContent = ""; saveDraft(); });
+      f.note.addEventListener("input", saveDraft);
+      f.sub.addEventListener("change", () => { f.sub.dataset.manual = f.sub.value ? "1" : ""; saveDraft(); });
+      f.kind.addEventListener("change", () => { f.kind.dataset.manual = "1"; saveDraft(); });
+      for (const inp of [f.topic, f.note]) inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); nextRow(row); }
+      });
+      del.addEventListener("click", () => { row.remove(); if (!rows().length) addRow(); saveDraft(); });
+      rowsBox.append(row);
+      if (focus) f.topic.focus();
+      return row;
+    }
+    function putTopic(t) {
+      if (rows().some((r) => nrm(r._f.topic.value) === nrm(t))) return;
+      const empty = rows().find((r) => !r._f.topic.value.trim());
+      if (empty) { empty._f.topic.value = t; autoFill(empty._f); } else addRow({ topic: t, subject: subjOf.get(t) || guess(t) });
+      saveDraft();
+    }
+    (draft.rows && draft.rows.length ? draft.rows : [{}, {}, {}]).forEach((v) => addRow(v));
+    const chipsHead = el("div", { class: "muted" }, "이 기업에서 자주 나온 주제 · 누르면 아래에 담겨요");
+    const chips = el("div", { class: "chips" });
+    function fillChips() {
+      const co = sh.co.value;
+      let top = countBy(recs.filter((r) => r.company === co).map((r) => r.topic)).map((x) => x[0]);
+      if (top.length < 8) top = top.concat(countBy(recs.map((r) => r.topic)).map((x) => x[0]).filter((t) => !top.includes(t)));
+      top = top.slice(0, 12);
+      chipsHead.textContent = (recs.some((r) => r.company === co) ? co + "에서" : "다른 기업에서") + " 자주 나온 주제 · 누르면 아래에 담겨요";
+      chips.replaceChildren(...top.map((t) => {
+        const b = el("button", { type: "button", class: "chip pick" }, "+ " + t);
+        b.addEventListener("click", () => putTopic(t));
+        return b;
+      }));
+      chipsHead.hidden = chips.hidden = !top.length;
+    }
+    loadRecalls().then((d) => {
+      recs = d.all || [];
+      recs.forEach((r) => { if (r.topic && SUBS.includes(r.subject) && !subjOf.has(r.topic)) subjOf.set(r.topic, r.subject); });
+      guess = buildGuess(recs);
+      const names = [...new Set(recs.map((r) => r.topic).concat(S.problems.map((p) => p.topic)).filter(Boolean))].slice(0, 500);
+      topicList.replaceChildren(...names.map((t) => el("option", { value: t })));
+      fillChips();
+      rows().forEach((r) => { if (r._f.topic.value && !r._f.sub.value) autoFill(r._f); });
+    });
+    sh.co.addEventListener("change", () => { fillChips(); saveDraft(); });
+    for (const k of ["period", "track", "level"]) sh[k].addEventListener("change", saveDraft);
+
     const msg = el("span", { class: "msg", role: "status" });
     const submit = el("button", { class: "btn", type: "submit" }, "복기 올리기");
-    const lab = (t, input, full) => el("div", { class: "field" + (full ? " full" : "") }, el("label", { for: input.id }, t), input);
-    const form = el("form", { class: "panel grid2", novalidate: "" },
+    const more = el("button", { type: "button", class: "btn-line" }, "+ 주제 추가");
+    more.addEventListener("click", () => addRow(null, true));
+    const lab = (t, input) => el("div", { class: "field" }, el("label", { for: input.id }, t), input);
+    const form = el("form", { class: "panel", novalidate: "" },
       el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 문제 원문 말고 주제와 유형만 적어주세요."),
-      lab("기업", f.co), lab("시험 시기", f.period), lab("직렬", f.track), lab("과목", f.sub),
-      lab("출제 주제", f.topic, true), lab("유형", f.kind), lab("체감 난이도 (1 쉬움 ~ 5 어려움)", f.level), lab("메모 (선택)", f.note, true),
-      el("div", { class: "actions" }, submit, msg));
+      el("div", { class: "grid2" }, lab("기업", sh.co), lab("시험 시기", sh.period), lab("직렬", sh.track), lab("이번 시험 체감 난이도", sh.level)),
+      el("h3", { class: "rhead" }, "기억나는 주제를 한 줄에 하나씩"),
+      chipsHead, chips, rowsBox, topicList,
+      el("p", { class: "muted" }, "Enter를 누르면 다음 줄로 넘어가요. 과목·유형은 주제를 보고 자동으로 골라요 (직접 바꿔도 돼요). 쓰던 내용은 이 기기에 자동 저장돼요."),
+      el("div", { class: "actions" }, more, submit, msg));
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const subject = f.sub.value.trim(), topic = f.topic.value.trim();
-      msg.className = "msg";
-      const bad = checkRecallText(topic, f.note.value.trim());
-      if (bad) { msg.textContent = bad; msg.className = "msg err"; return; }
-      submit.disabled = true; msg.textContent = "올리는 중…";
-      const row = { company: f.co.value, period: f.period.value, track: f.track.value, subject, topic, kind: f.kind.value, level: Number(f.level.value), note: f.note.value.trim() || null };
-      const { error } = await sb.from("recalls").insert(row);
-      submit.disabled = false;
-      if (error) { msg.textContent = /[가-힣]/.test(error.message || "") ? error.message : "올리지 못했어요. 잠시 후 다시 눌러주세요."; msg.className = "msg err"; return; }
-      store.set("lastRecall", { co: row.company, period: row.period, track: row.track });
-      f.topic.value = ""; f.note.value = "";
-      msg.textContent = "올렸어요! 검사를 통과하면 공개되고 +1점, 문제로 만들어지면 +2점 더.";
-      loadRecalls(true); loadMine(mine);
+      msg.className = "msg"; msg.textContent = "";
+      const list = rows().filter((r) => r._f.topic.value.trim() || r._f.note.value.trim());
+      if (!list.length) { msg.textContent = "주제를 하나 이상 적어주세요."; msg.className = "msg err"; return; }
+      let bad = 0;
+      for (const r of list) {
+        const f = r._f;
+        const why = !f.sub.value ? "과목을 골라주세요." : checkRecallText(f.topic.value.trim(), f.note.value.trim());
+        f.err.textContent = why; if (why) bad++;
+      }
+      if (bad) { msg.textContent = "빨간 글씨가 있는 줄을 고쳐주세요."; msg.className = "msg err"; return; }
+      submit.disabled = more.disabled = true;
+      let ok = 0, fail = 0;
+      for (const [i, r] of list.entries()) {
+        const f = r._f;
+        msg.textContent = "올리는 중… (" + (i + 1) + "/" + list.length + ")";
+        const row = { company: sh.co.value, period: sh.period.value, track: sh.track.value, subject: f.sub.value, topic: f.topic.value.trim(),
+                      kind: f.kind.value, level: Number(sh.level.value), note: f.note.value.trim() || null };
+        const { error } = await sb.from("recalls").insert(row);
+        if (error) { fail++; f.err.textContent = /[가-힣]/.test(error.message || "") ? error.message : "올리지 못했어요. 잠시 후 다시 눌러주세요."; }
+        else { ok++; r.remove(); }
+      }
+      submit.disabled = more.disabled = false;
+      store.set("lastRecall", { co: sh.co.value, period: sh.period.value, track: sh.track.value });
+      if (!rows().length) addRow();
+      saveDraft();
+      msg.className = fail ? "msg err" : "msg";
+      msg.textContent = (ok ? ok + "건 올렸어요! 검사를 통과하면 공개되고 건당 +1점, 문제로 만들어지면 +2점 더. " : "") +
+                        (fail ? fail + "건은 못 올렸어요. 남아 있는 줄의 빨간 글씨를 확인해 주세요." : "");
+      if (ok) { loadRecalls(true); loadMine(mine); }
     });
     const mine = el("div", { class: "list" }, el("div", { class: "empty" }, "내 복기를 불러오는 중이에요…"));
     const admin = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "검토할 복기를 불러오는 중이에요…")) : null;
