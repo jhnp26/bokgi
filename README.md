@@ -4,6 +4,6 @@
 
 - 사이트: https://jhnp26.github.io/bokgi/
 - 문제 데이터: `data/problems.json`
-- 자동 생성: 매주 월요일 `tools/generate.py`가 새 복기로 문제를 만들어 추가 (`.github/workflows/site.yml`)
+- 자동 생성: 매일 오전 9시 `tools/generate.py`가 새 복기를 검사하고 문제를 만들어 추가 (`.github/workflows/site.yml`)
 
 문제는 AI가 만들고 운영자가 검수합니다. 시험 문제 원문은 받지도 올리지도 않습니다.
