@@ -319,7 +319,14 @@
       const r = await fetch("data/problems.json", { cache: "no-cache" });
       if (!r.ok) throw new Error(r.status);
       const j = await r.json();
-      S.problems = Array.isArray(j.problems) ? j.problems : [];
+      S.allProblems = Array.isArray(j.problems) ? j.problems : [];
+      S.hidden = new Map();
+      if (sb) {
+        // 운영자가 사이트에서 숨긴 문제(오류 신고 등)는 목록·모의고사에서 빼요
+        const { data: hid } = await sb.from("hidden_problems").select("problem_id,reason,hidden_at");
+        (hid || []).forEach((h) => S.hidden.set(h.problem_id, h));
+      }
+      S.problems = S.allProblems.filter((p) => !S.hidden.has(p.id));
       if (j.updated) $("updated").textContent = "문제 업데이트: " + j.updated + " · 총 " + S.problems.length + "문제";
     } catch (e) {
       S.problems = [];
@@ -700,7 +707,7 @@
     const reports = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "신고를 불러오는 중이에요…")) : null;
     box.replaceChildren(
       ...(S.isAdmin ? [el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin,
-                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
+                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 숨긴 문제"), hiddenList(), el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
       el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), rules), form, el("h2", {}, "내가 올린 복기"), mine);
     loadMine(mine);
     if (admin) loadAdmin(admin);
@@ -722,17 +729,45 @@
     if (error) { box.replaceChildren(el("div", { class: "empty" }, "신고를 불러오지 못했어요.")); return; }
     if (!data.length) { box.replaceChildren(el("div", { class: "empty" }, "새 오류 신고가 없어요.")); return; }
     box.replaceChildren(
-      el("p", { class: "muted" }, "Claude에게 \"오류 신고 확인해줘\"라고 하면 문제를 고쳐서 올려요. 고친 뒤 '해결'을 눌러주세요."),
+      el("p", { class: "muted" }, "정말 틀린 문제면 '문제 숨기기'를 누르세요. 사이트와 모의고사에서 바로 빠지고 신고도 해결 처리돼요. 신고가 잘못된 거면 '해결'만 누르면 돼요. (Claude가 있으면 \"오류 신고 확인해줘\"로 고쳐서 다시 보이게 할 수 있어요)"),
       ...data.map((r) => {
-        const prob = S.problems.find((x) => x.id === r.problem_id);
+        const prob = (S.allProblems || S.problems).find((x) => x.id === r.problem_id);
         const done = el("button", { type: "button", class: "btn-line sm" }, "해결");
         done.addEventListener("click", async () => { const { error: err } = await sb.rpc("admin_resolve_report", { rid: r.id }); if (!err) { loadReports(box); refreshAdminCounts(); } });
+        const hide = el("button", { type: "button", class: "btn sm" }, "문제 숨기기");
+        armButton(hide, "문제 숨기기", "한 번 더 누르면 숨겨요", async () => {
+          const { error: e1 } = await sb.rpc("admin_hide_problem", { pid: r.problem_id, why: (r.reason || "") + (r.note ? " · " + r.note : "") });
+          if (e1) { hide.textContent = "숨기지 못했어요"; return; }
+          await sb.rpc("admin_resolve_report", { rid: r.id });
+          await loadProblems(); loadReports(box); refreshAdminCounts();
+          const hl = $("hiddenlist"); if (hl) hl.replaceWith(hiddenList());
+        });
+        if (S.hidden && S.hidden.has(r.problem_id)) hide.disabled = true;
         return el("article", { class: "rec" },
           el("div", { class: "meta" }, [r.problem_id, prob ? prob.subject + " · " + prob.topic : "", r.reason, "by " + r.nickname, new Date(r.created_at).toLocaleDateString("ko-KR")].filter(Boolean).join(" · ")),
           el("div", { class: "topic" }, prob ? prob.q.slice(0, 80) + (prob.q.length > 80 ? "…" : "") : "(지금은 없는 문제)"),
           r.note ? el("div", { class: "note" }, r.note) : null,
-          el("div", { class: "actions" }, done));
+          el("div", { class: "actions" }, hide, done));
       }));
+  }
+
+  function hiddenList() {
+    const box = el("div", { class: "list", id: "hiddenlist" });
+    const items = [...(S.hidden || new Map()).values()];
+    if (!items.length) return el("div", { class: "empty", id: "hiddenlist" }, "숨긴 문제가 없어요.");
+    items.forEach((h) => {
+      const prob = (S.allProblems || []).find((x) => x.id === h.problem_id);
+      const un = el("button", { type: "button", class: "btn-line sm" }, "숨김 풀기");
+      armButton(un, "숨김 풀기", "한 번 더 누르면 다시 보여요", async () => {
+        const { error } = await sb.rpc("admin_unhide_problem", { pid: h.problem_id });
+        if (!error) { await loadProblems(); const hl = $("hiddenlist"); if (hl) hl.replaceWith(hiddenList()); }
+      });
+      box.append(el("article", { class: "rec" },
+        el("div", { class: "meta" }, [h.problem_id, prob ? prob.subject + " · " + prob.topic : "", h.reason, new Date(h.hidden_at).toLocaleDateString("ko-KR")].filter(Boolean).join(" · ")),
+        el("div", { class: "topic" }, prob ? prob.q.slice(0, 80) + (prob.q.length > 80 ? "…" : "") : "(지금은 없는 문제)"),
+        el("div", { class: "actions" }, un)));
+    });
+    return box;
   }
 
   async function loadCodes(box) {
