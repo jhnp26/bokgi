@@ -151,6 +151,7 @@
     if (name === "mock" && !S.mock) renderMockHome();
   }
   document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
+  if ($("btn-cta")) $("btn-cta").addEventListener("click", () => { showTab("recall"); document.querySelector(".tabs").scrollIntoView({ block: "start" }); });
 
   /* ================= account ================= */
   const toEmail = (id) => id.trim().toLowerCase() + "@" + (CFG.idDomain || "id.bokgi.kr");
@@ -864,42 +865,18 @@
   }
 
   /* ================= recall submit ================= */
-  function draftHint() {
-    const n = ((store.get("recallDraft", null) || {}).rows || []).filter((x) => (x.topic || "").trim()).length;
-    return n ? el("p", { class: "rule" }, "담아둔 주제 " + n + "개가 있어요. 로그인하면 바로 올릴 수 있어요.") : null;
-  }
   function opts(sel, items) { sel.replaceChildren(...items.map((v) => el("option", { value: v }, v))); return sel; }
   async function renderRecall() {
     const box = $("recallbox");
-    const rules = el("ul", { class: "rules" },
-      el("li", {}, el("b", {}, "문제 원문은 그대로 옮기지 마세요."), " 어떤 주제가 어떤 식으로 나왔는지만 적어주세요. 시험 문제는 출제기관 저작물이고, 유출 금지 서약을 받는 시험도 있어요."),
-      el("li", {}, "올린 복기는 검사(운영자 확인 또는 매일 오전 9시 자동 검사)를 통과하면 닉네임(김*희)과 함께 공개돼요. 그 전에는 나만 보여요."),
-      el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 하루 25건까지예요."),
-      el("li", {}, "점수: 공개된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가"));
     if (!sb) { box.replaceChildren(el("div", { class: "empty" }, "지금은 복기를 받을 수 없어요. 잠시 후 다시 열어주세요.")); return; }
-    if (!S.user) {
-      const a = el("button", { type: "button", class: "btn" }, "로그인하고 복기 남기기");
-      a.addEventListener("click", () => openAuth("login"));
-      const b = el("button", { type: "button", class: "btn-line" }, "회원가입");
-      b.addEventListener("click", () => openAuth("signup"));
-      box.replaceChildren(el("div", { class: "panel" },
-        el("h2", {}, "시험 보고 왔다면 복기를 남겨주세요"),
-        el("p", {}, "남겨준 주제는 검사를 거쳐 출제 경향에 쌓이고, 같은 유형의 새 문제로 만들어져요. 많이 남길수록 랭킹이 올라가요."),
-        el("h3", { class: "rhead" }, "시험 보고 나오면 이렇게"), postExamSteps(),
-        rules, draftHint(), el("div", { class: "actions" }, a, b)));
-      return;
-    }
-    if (!S.realName) {
-      box.replaceChildren(el("div", { class: "panel" }, el("h2", {}, "실명을 먼저 등록해 주세요"),
-        el("p", {}, "복기를 올리려면 실명이 필요해요. 화면 위쪽의 '실명을 등록해 주세요' 칸에 적어주세요."), rules));
-      return;
-    }
-    if (!S.verified && !S.isAdmin) {
-      box.replaceChildren(el("div", { class: "panel" }, el("h2", {}, "실명 확인을 기다리는 중이에요"),
-        el("p", {}, "운영자가 실명(" + S.realName + ")을 확인하면 복기를 올리고 랭킹에 오를 수 있어요. 그 전에도 문제 풀기와 모의고사는 다 쓸 수 있어요."),
-        el("p", { class: "muted" }, "오래 걸리면 단톡방에서 운영자에게 아이디를 알려주세요."), rules));
-      return;
-    }
+    const guest = !S.user, needReal = !!S.user && !S.realName, unverified = !!S.user && !!S.realName && !S.verified && !S.isAdmin;
+    const rules = el("details", { class: "fold" }, el("summary", {}, "올리기 전에 알아둘 것 (검사 · 공개 · 점수)"),
+      el("ul", { class: "rules" },
+        el("li", {}, el("b", {}, "문제 원문은 그대로 옮기지 마세요."), " 어떤 주제가 어떤 식으로 나왔는지만 적어주세요. 시험 문제는 출제기관 저작물이고, 유출 금지 서약을 받는 시험도 있어요."),
+        el("li", {}, "올린 복기는 검사(운영자 확인 또는 매일 오전 9시 자동 검사)를 통과하면 닉네임(김*희)과 함께 공개돼요. 그 전에는 나만 보여요."),
+        el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 하루 25건까지예요 (실명 확인 전에는 10건)."),
+        el("li", {}, "점수: 공개된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가. 랭킹에는 운영자가 실명을 확인한 회원만 올라가요 (확인 전 점수도 그대로 쌓여 있어요).")));
+    const howTo = el("details", { class: "fold" }, el("summary", {}, "처음이면: 시험 보고 나와서 이렇게 하면 돼요"), postExamSteps());
     const draft = store.get("recallDraft", null) || {};
     const last = store.get("lastRecall", {});
     const sh = {
@@ -909,8 +886,9 @@
     };
     sh.sess = el("select", { id: "r-sess" }, el("option", { value: "" }, "회차 없이 (주제만)"));
     sh.level.value = draft.level || "3";
+    const periodOf = (d) => { const p = String(d).slice(0, 4) + (Number(String(d).slice(5, 7)) <= 6 ? " 상반기" : " 하반기"); return PERIODS.includes(p) ? p : ""; };
     for (const k of ["co", "period", "track"]) {
-      const v = draft[k] || last[k];
+      const v = draft[k] || (k === "period" ? periodOf(today()) : "") || last[k];
       if (v && [...sh[k].options].some((o) => o.value === v)) sh[k].value = v;
     }
     let guess = buildGuess([]), recs = [];
@@ -918,12 +896,12 @@
     const rowsBox = el("div", { class: "rrows" });
     const topicList = el("datalist", { id: "r-topics" });
     const rows = () => [...rowsBox.children];
-    let sessions = [], sessReady = false;
+    let sessions = [], sessReady = false, sessManual = !!draft.sessManual;
     const curSess = () => sessions.find((x) => String(x.id) === sh.sess.value);
     function saveDraft() {
       store.set("recallDraft", {
         co: sh.co.value, period: sh.period.value, track: sh.track.value, level: sh.level.value,
-        sess: sessReady ? sh.sess.value : draft.sess || "",
+        sess: sessReady ? sh.sess.value : draft.sess || "", sessManual,
         rows: rows().map((r) => ({ qno: r._f.qno.value, subject: r._f.sub.value, kind: r._f.kind.value, topic: r._f.topic.value, note: r._f.note.value, ms: !!r._f.sub.dataset.manual }))
           .filter((x) => x.topic.trim() || x.note.trim())
       });
@@ -1008,46 +986,69 @@
     nt.value = "필기";
     const nmk = el("button", { type: "button", class: "btn sm" }, "회차 만들기");
     const newBox = el("div", { class: "actions sessnew", hidden: "" }, nd, nt, nmk, sessMsg);
+    const sessHint = el("div", { class: "sesshint muted" });
+    const quick = el("button", { type: "button", class: "btn-line sm" }, "오늘(" + today().slice(5).replace("-", "/") + ") 본 시험 회차 바로 만들기");
+    const recentSess = () => sessions.filter((x) => x.company === sh.co.value)
+      .filter((x) => { const g = (Date.parse(today()) - Date.parse(x.exam_date)) / DAY; return g >= -1 && g <= 3; })
+      .sort((a, b) => String(b.exam_date).localeCompare(String(a.exam_date)))[0];
+    let autoPicked = false;
     function sessChanged() {
       newBox.hidden = sh.sess.value !== "new";
       const x = curSess();
+      if (x) { const p = periodOf(x.exam_date); if (p) sh.period.value = p; }
       sh.period.disabled = !!x;
+      if (x && autoPicked) sessHint.replaceChildren("최근 시험이라 자동으로 골랐어요. 같은 시험 본 사람들 복기와 번호별로 모여요.");
+      else if (!x && sh.sess.value !== "new" && !recentSess()) sessHint.replaceChildren(el("span", {}, "같은 날 같은 시험 본 사람들과 번호별로 모으려면 → "), quick);
+      else sessHint.replaceChildren();
+      updExtra();
       rowsBox.classList.toggle("withno", !!x);
       sessGrid.replaceChildren();
-      if (x) numGrid(x).then((g) => { if (curSess() === x) sessGrid.replaceChildren(g); });
+      if (x) numGrid(x).then((g) => { if (curSess() === x) sessGrid.replaceChildren(el("details", { class: "fold" }, el("summary", {}, "이 회차 번호 현황 보기 (어느 번호가 비었는지)"), g)); });
       if (sessReady) saveDraft();
     }
     function fillSess(keep) {
       const list = sessions.filter((x) => x.company === sh.co.value);
-      const want = keep != null ? keep : sh.sess.value;
+      let want = keep != null ? keep : sh.sess.value;
+      autoPicked = false;
+      if (!want && !sessManual) { const r = recentSess(); if (r) { want = String(r.id); autoPicked = true; } }
       sh.sess.replaceChildren(el("option", { value: "" }, "회차 없이 (주제만)"),
         ...list.map((x) => el("option", { value: String(x.id) }, sessLabel(x) + " · 복기 " + x.recalls + "건")),
         el("option", { value: "new" }, "+ 새 회차 만들기"));
       sh.sess.value = [...sh.sess.options].some((o) => o.value === want) ? want : "";
       sessChanged();
     }
-    sh.sess.addEventListener("change", sessChanged);
-    nmk.addEventListener("click", async () => {
-      sessMsg.className = "msg"; sessMsg.textContent = "";
-      const t = nt.value.trim();
-      if (!nd.value || !t) { sessMsg.textContent = "날짜와 이름을 적어주세요."; sessMsg.className = "msg err"; return; }
-      nmk.disabled = true;
-      const { data, error } = await sb.rpc("create_session", { co: sh.co.value, d: nd.value, t });
-      nmk.disabled = false;
-      if (error) { sessMsg.textContent = /[가-힣]/.test(error.message || "") ? error.message : "회차를 만들지 못했어요."; sessMsg.className = "msg err"; return; }
+    sh.sess.addEventListener("change", () => { sessManual = true; autoPicked = false; sessChanged(); });
+    async function makeSess(d, t, out, btn) {
+      out.className = "msg"; out.textContent = "";
+      if (guest) { saveDraft(); openAuth("login"); return; }
+      if (needReal) { out.textContent = "화면 위에서 실명을 먼저 등록해 주세요."; out.className = "msg err"; return; }
+      if (!d || !t) { out.textContent = "날짜와 이름을 적어주세요."; out.className = "msg err"; return; }
+      btn.disabled = true;
+      const { data, error } = await sb.rpc("create_session", { co: sh.co.value, d, t });
+      btn.disabled = false;
+      if (error) { out.textContent = /[가-힣]/.test(error.message || "") ? error.message : "회차를 만들지 못했어요."; out.className = "msg err"; return; }
       sessions = await loadSessions(true);
-      fillSess(String(data)); reloadSessAdmin();
-    });
+      sessManual = true; fillSess(String(data)); reloadSessAdmin();
+    }
+    nmk.addEventListener("click", () => makeSess(nd.value, nt.value.trim(), sessMsg, nmk));
+    const quickMsg = el("span", { class: "msg", role: "status" });
+    quick.addEventListener("click", () => { sessHint.append(quickMsg); makeSess(today(), "필기", quickMsg, quick); });
     loadSessions(true).then((list) => { sessions = list; sessReady = true; fillSess(draft.sess || ""); });
-    sh.co.addEventListener("change", () => { fillChips(); if (sessReady) fillSess(""); saveDraft(); });
-    for (const k of ["period", "track", "level"]) sh[k].addEventListener("change", saveDraft);
+    sh.co.addEventListener("change", () => { fillChips(); sessManual = false; if (sessReady) fillSess(""); saveDraft(); });
+    const extraSum = el("summary", {});
+    function updExtra() { extraSum.textContent = "추가 정보 (선택) · " + sh.period.value + " · " + sh.track.value + " · 체감 난이도 " + sh.level.value; }
+    for (const k of ["period", "track", "level"]) sh[k].addEventListener("change", () => { updExtra(); saveDraft(); });
+    updExtra();
 
     const pasteTa = el("textarea", { rows: "6", "aria-label": "붙여넣을 메모",
       placeholder: "31 RLC 공진주파수 계산\n32. 동기기 전기자 반작용 종류\n33번 KEC 접지도체 굵기\n(번호 없이 적어도 돼요)" });
     const pasteBtn = el("button", { type: "button", class: "btn-line sm" }, "줄마다 나눠서 담기");
     const pasteMsg = el("span", { class: "msg", role: "status" });
-    const paste = el("details", { class: "paste" }, el("summary", {}, "폰 메모를 붙여넣어서 한 번에 담기"),
-      el("p", { class: "muted" }, "한 줄에 한 문제씩. 줄 앞에 번호(31, 31., 31번)가 있으면 번호 칸에 들어가요."), pasteTa, el("div", { class: "actions" }, pasteBtn, pasteMsg));
+    const hasRows = (draft.rows || []).some((x) => (x.topic || "").trim());
+    const paste = el("details", { class: "paste" }, el("summary", {}, "폰 메모 통째로 붙여넣기 (가장 빨라요)"),
+      el("p", { class: "muted" }, "한 줄에 한 문제씩. 붙여넣으면 바로 아래 줄로 나눠 담겨요. 줄 앞 번호(31, 31., 31번)는 번호 칸에 들어가요."), pasteTa, el("div", { class: "actions" }, pasteBtn, pasteMsg));
+    if (!hasRows) paste.open = true;
+    pasteTa.addEventListener("paste", () => setTimeout(() => { if (pasteTa.value.trim()) pasteBtn.click(); }, 0));
     pasteBtn.addEventListener("click", () => {
       let n = 0, numbered = 0;
       for (const raw of pasteTa.value.split(/\r?\n/)) {
@@ -1066,33 +1067,43 @@
       }
       if (n) { pasteTa.value = ""; saveDraft(); }
       pasteMsg.className = n ? "msg" : "msg err";
-      pasteMsg.textContent = n ? n + "줄을 아래에 담았어요. 과목이 비어 있는 줄만 골라주세요." + (numbered && !curSess() ? " 번호를 살리려면 위에서 시험 회차를 고르세요." : "") : "담을 줄이 없어요.";
+      pasteMsg.textContent = n ? n + "줄을 아래에 담았어요. 과목은 자동으로 골랐으니 틀린 것만 바꾸고 '복기 올리기'를 누르세요." + (numbered && !curSess() ? " 번호를 살리려면 위에서 시험 회차를 고르세요." : "") : "담을 줄이 없어요.";
     });
     const msg = el("span", { class: "msg", role: "status" });
-    const submit = el("button", { class: "btn", type: "submit" }, "복기 올리기");
+    const submit = el("button", { class: "btn", type: "submit" }, guest ? "로그인하고 올리기" : "복기 올리기");
+    const shareBox = el("div", { class: "actions" });
     const more = el("button", { type: "button", class: "btn-line" }, "+ 주제 추가");
     more.addEventListener("click", () => addRow(null, true));
     const lab = (t, input) => el("div", { class: "field" }, el("label", { for: input.id }, t), input);
+    const who = guest ? el("div", { class: "rule" }, "로그인 전에도 적어둘 수 있어요. 쓰던 내용은 이 기기에 저장되고, 올릴 때 로그인(처음이면 1분 가입)하면 그대로 올라가요.")
+      : needReal ? el("div", { class: "rule" }, "화면 위쪽에서 실명을 등록하면 바로 올릴 수 있어요. 적어둔 내용은 이 기기에 저장돼요.")
+      : unverified ? el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 실명 확인 전이어도 바로 올릴 수 있고, 검사를 통과하면 공개돼요. 랭킹은 운영자가 실명을 확인하면 반영돼요.")
+      : el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 문제 원문 말고 번호와 키워드만 적어주세요.");
     const form = el("form", { class: "panel", novalidate: "" },
-      el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 문제 원문 말고 주제와 유형만 적어주세요."),
+      who,
       el("div", { class: "grid2" }, lab("기업", sh.co),
         el("div", { class: "field" }, el("label", { for: "r-sess" }, "시험 회차"), sh.sess),
-        el("div", { class: "full" }, newBox, sessGrid),
-        lab("시험 시기", sh.period), lab("직렬", sh.track), lab("이번 시험 체감 난이도", sh.level)),
-      el("h3", { class: "rhead" }, "기억나는 주제를 한 줄에 하나씩"),
-      paste, chipsHead, chips, rowsBox, topicList,
+        el("div", { class: "full" }, sessHint, newBox, sessGrid)),
+      el("h3", { class: "rhead" }, "기억나는 문제를 한 줄에 하나씩 (원문 말고 번호·키워드만)"),
+      paste, rowsBox, topicList,
       el("p", { class: "muted" }, "Enter를 누르면 다음 줄로 넘어가요. 과목·유형은 주제를 보고 자동으로 골라요 (직접 바꿔도 돼요). 쓰던 내용은 이 기기에 자동 저장돼요."),
-      el("div", { class: "actions" }, more, submit, msg));
+      el("details", { class: "fold" }, el("summary", {}, "생각이 안 나면: 자주 나온 주제에서 고르기"), chipsHead, chips),
+      el("details", { class: "fold extra" }, extraSum, el("div", { class: "grid2" }, lab("시험 시기", sh.period), lab("직렬", sh.track), lab("이번 시험 체감 난이도", sh.level))),
+      el("div", { class: "actions" }, more, submit, msg), shareBox);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       msg.className = "msg"; msg.textContent = "";
+      shareBox.replaceChildren();
+      saveDraft();
+      if (guest) { msg.textContent = "로그인하면 적어둔 내용 그대로 올릴 수 있어요. 처음이면 '회원가입'을 눌러주세요."; openAuth("login"); return; }
+      if (needReal) { msg.textContent = "화면 위쪽에서 실명을 먼저 등록해 주세요."; msg.className = "msg err"; $("realbox").scrollIntoView({ block: "center" }); return; }
       const list = rows().filter((r) => r._f.topic.value.trim() || r._f.note.value.trim());
       if (!list.length) { msg.textContent = "주제를 하나 이상 적어주세요."; msg.className = "msg err"; return; }
       let bad = 0;
       for (const r of list) {
         const f = r._f;
         const q = f.qno.value.trim();
-        const why = !f.sub.value ? "과목을 골라주세요." : (curSess() && q && !/^(100|[1-9]\d?)$/.test(q)) ? "번호는 1~100 사이 숫자로 적어주세요." : checkRecallText(f.topic.value.trim(), f.note.value.trim());
+        const why = (curSess() && q && !/^(100|[1-9]\d?)$/.test(q)) ? "번호는 1~100 사이 숫자로 적어주세요." : checkRecallText(f.topic.value.trim(), f.note.value.trim());
         f.err.textContent = why; if (why) bad++;
       }
       if (bad) { msg.textContent = "빨간 글씨가 있는 줄을 고쳐주세요."; msg.className = "msg err"; return; }
@@ -1102,7 +1113,7 @@
       for (const [i, r] of list.entries()) {
         const f = r._f;
         msg.textContent = "올리는 중… (" + (i + 1) + "/" + list.length + ")";
-        const row = { company: sh.co.value, period: sh.period.value, track: sh.track.value, subject: f.sub.value, topic: f.topic.value.trim(),
+        const row = { company: sh.co.value, period: sh.period.value, track: sh.track.value, subject: f.sub.value || "기타", topic: f.topic.value.trim(),
                       kind: f.kind.value, level: Number(sh.level.value), note: f.note.value.trim() || null };
         if (sx) { row.session_id = sx.id; if (f.qno.value.trim()) row.qno = Number(f.qno.value); }
         const { error } = await sb.from("recalls").insert(row);
@@ -1119,6 +1130,19 @@
       if (ok) {
         loadRecalls(true); loadMine(mine);
         if (sx) loadSessions(true).then((list) => { sessions = list; fillSess(String(sx.id)); reloadSessAdmin(); });
+        if (sx) {
+          const url = location.origin + location.pathname + "#s=" + sx.id;
+          const text = sx.company + " " + sessLabel(sx) + " 복기판이에요. 기억나는 번호 같이 채워요!";
+          const share = el("button", { type: "button", class: "btn sm" }, "같이 시험 본 사람들에게 복기판 링크 보내기");
+          share.addEventListener("click", async () => {
+            if (navigator.share && matchMedia("(pointer:coarse)").matches) {
+              try { await navigator.share({ title: "복기판", text, url }); return; } catch (err) { if (err && err.name === "AbortError") return; }
+            }
+            try { await navigator.clipboard.writeText(text + " " + url); share.textContent = "복사됐어요 · 단톡방에 붙여넣기"; }
+            catch (err) { share.textContent = url; }
+          });
+          shareBox.replaceChildren(share);
+        }
       }
     });
     const mine = el("div", { class: "list" }, el("div", { class: "empty" }, "내 복기를 불러오는 중이에요…"));
@@ -1131,8 +1155,10 @@
     box.replaceChildren(
       ...(S.isAdmin ? [el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin, el("h2", {}, "운영자 · 시험 회차"), sessAdmin,
                        el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 정답 확인 필요 (자동 감지)"), suspectList(), el("h2", {}, "운영자 · 숨긴 문제"), hiddenList(), el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
-      el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), el("h3", { class: "rhead" }, "시험 보고 나오면 이렇게"), postExamSteps(), rules), form, el("h2", {}, "내가 올린 복기"), mine);
-    loadMine(mine);
+      el("div", { class: "panel" }, el("h2", {}, "복기 남기기"),
+        el("p", { class: "muted" }, "폰 메모를 붙여넣고 '복기 올리기'만 누르면 끝이에요. 회차·과목·유형·번호는 알아서 채워요."), howTo, rules),
+      form, ...(S.user ? [el("h2", {}, "내가 올린 복기"), mine] : []));
+    if (S.user) loadMine(mine);
     if (admin) loadAdmin(admin);
     if (members) loadMembers(members);
     if (codes) loadCodes(codes);

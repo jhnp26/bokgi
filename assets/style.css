@@ -300,3 +300,11 @@ article.q{scroll-margin-top:110px}
 .studygrid .l1,.studygrid .l2,.studygrid .l3,.studygrid .l4{background:var(--omr)}
 .studygrid .l1{opacity:.3}.studygrid .l2{opacity:.55}.studygrid .l3{opacity:.78}
 .bars.prog .bar{grid-template-columns:minmax(0,7em) 1fr 6.4em}
+
+/* 복기 간편 흐름 */
+.cta{margin-top:12px}
+.fold{margin:8px 0 0}
+.fold>summary{cursor:pointer;font-weight:500;font-size:14px;color:var(--ink)}
+.fold[open]>summary{margin-bottom:6px}
+.sesshint{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 4px;font-size:13px}
+.sesshint:empty{display:none}
