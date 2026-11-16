@@ -185,3 +185,32 @@ button.chip.pick:hover{background:var(--omr-soft);border-color:var(--omr)}
 .weak .bar{grid-template-columns:minmax(0,7em) 1fr 5.6em}
 .weak .linkish{font:inherit;background:none;border:0;padding:0;color:var(--omr);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .weak .bar .linkish{color:var(--ink)}
+
+/* 시험 회차 · 번호별 복기 */
+.rrows:not(.withno) .qno{display:none}
+.rrows.withno .rline{grid-template-columns:4.6em minmax(0,10em) minmax(0,1fr) auto}
+.qno{text-align:center;font-family:var(--f-num)}
+.sessnew{flex-wrap:wrap;margin:6px 0}
+.sessnew input{width:auto;flex:1 1 9em;min-width:0}
+.paste{border:1px dashed var(--line);border-radius:8px;padding:8px 12px;background:var(--paper)}
+.paste summary{cursor:pointer;font-weight:500;font-size:14px}
+.paste textarea{width:100%;box-sizing:border-box;margin-top:6px;font:inherit;font-size:14px}
+.paste p{margin:6px 0 0}
+.qwrap{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(2.3em,1fr));gap:4px}
+.qn{font-family:var(--f-num);font-size:12px;text-align:center;padding:4px 0;border:1px solid var(--line);border-radius:5px;color:var(--muted);background:var(--card)}
+.qn.wait{background:var(--omr-soft);color:var(--ink);border-color:var(--omr-soft)}
+.qn.on{background:var(--omr);color:#fff;border-color:var(--omr)}
+.sesslist{display:grid;grid-template-columns:repeat(auto-fill,minmax(15em,1fr));gap:8px}
+.sess{font:inherit;text-align:left;display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer;min-width:0}
+.sess span{font-size:12.5px;color:var(--muted)}
+.sess.on,.sess:hover{border-color:var(--omr);background:var(--omr-soft)}
+.board{margin-top:10px}
+.board h3{margin:0}
+.steps li{margin-bottom:4px}
+@media (max-width:560px){
+  .rrows.withno .rline{grid-template-columns:4.6em minmax(0,1fr) auto}
+  .rrows.withno .rline select{grid-column:2}
+  .rrows.withno .rline .del{grid-column:3}
+  .rline .qno{grid-column:1;grid-row:1}
+}

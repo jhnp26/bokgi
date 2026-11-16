@@ -92,7 +92,8 @@ def read_pending():
     out = []
     for r in rows or []:
         rec = {k: ("" if r.get(k) is None else str(r.get(k))).strip() for k in FIELDS}
-        rec.update(_id=r["id"], by=r.get("nickname") or "", _status=r.get("status") or "pending")
+        rec.update(_id=r["id"], by=r.get("nickname") or "", _status=r.get("status") or "pending",
+                   _session=r.get("session_id"), _qno=r.get("qno"))
         out.append(rec)
     return out
 
@@ -451,6 +452,10 @@ def main():
             prob["by"] = rec["by"]
         if "_id" in rec:
             prob["fromRecall"] = rec["_id"]
+        if rec.get("_session"):
+            prob["session"] = int(rec["_session"])      # 시험 회차별 변형 모의고사에 씀
+            if rec.get("_qno"):
+                prob["qno"] = int(rec["_qno"])
         bank["problems"].append(prob)
         topic_count[tkey] = topic_count.get(tkey, 0) + 1
         finish(rec, "used", pid, "")
