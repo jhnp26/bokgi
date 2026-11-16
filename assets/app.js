@@ -122,6 +122,9 @@
   const S = {
     problems: [], loaded: false,
     answers: store.get("answers", {}) || {},
+    rev: store.get("rev", {}) || {},          // 틀린 문제 복습 일정 {id: {step, due}}
+    daily: store.get("daily", {}) || {},      // 날짜별 푼 문제 수
+    reviewPicks: {}, focus: "", limit: 20,
     user: null, nickname: "", realName: "", isAdmin: false, verified: false,
     exams: null, mock: null, timer: null
   };
@@ -292,7 +295,36 @@
   });
 
   /* ================= solving history ================= */
+  const DAY = 864e5, GAPS = [1, 3, 7];
+  const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+  function trackStudy(id, pick) {
+    const p = (S.allProblems || S.problems).find((x) => x.id === id);
+    if (!p) return;
+    const r = S.rev[id], now = Date.now();
+    if (pick !== p.answer) S.rev[id] = { step: 0, due: now + DAY };                  // 틀리면 내일 다시
+    else if (r && now >= r.due - DAY / 2) {                                          // 복습 날에 맞히면 다음 간격으로
+      const step = r.step + 1;
+      if (step >= GAPS.length) delete S.rev[id]; else S.rev[id] = { step, due: now + GAPS[step] * DAY };
+    }
+    store.set("rev", S.rev);
+    const t = today();
+    S.daily[t] = (S.daily[t] || 0) + 1;
+    const keys = Object.keys(S.daily).sort();
+    while (keys.length > 120) delete S.daily[keys.shift()];
+    store.set("daily", S.daily);
+  }
+  function streak() {
+    let n = 0; const d = new Date();
+    if (!S.daily[today()]) d.setDate(d.getDate() - 1);                                // 오늘 아직 안 풀었으면 어제부터 셈
+    for (;;) {
+      const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      if (!S.daily[k]) return n;
+      n++; d.setDate(d.getDate() - 1);
+    }
+  }
+  const dueList = () => S.problems.filter((p) => S.rev[p.id] && S.rev[p.id].due <= Date.now());
   function savePick(id, pick) {
+    trackStudy(id, pick);
     S.answers[id] = pick; store.set("answers", S.answers);
     if (sb && S.user) sb.from("progress").upsert({ user_id: S.user.id, problem_id: id, pick, updated_at: new Date().toISOString() }).then(() => {});
   }
@@ -350,11 +382,48 @@
     $("f-co").replaceChildren(el("option", { value: "" }, "전체 기업"), ...cos.map((x) => el("option", { value: x }, (x === "공통" ? "공통 (기업 무관)" : x + " 복기") + " (" + coCount.get(x) + ")")));
     $("f-sub").value = subCount.has(s) ? s : "";
     $("f-co").value = coCount.has(c) ? c : "";
+    if (![...$("f-view").options].some((o) => o.value === "review")) $("f-view").append(el("option", { value: "review" }, "오늘 복습할 문제"));
     $("f-view").value = store.get("view", "all");
+  }
+
+  // 내 약점: 과목별 정답률 + 자주 틀리는 주제
+  function weakPanel() {
+    const solved = S.problems.filter((p) => S.answers[p.id] !== undefined);
+    if (solved.length < 5) return null;
+    const by = new Map(), tp = new Map();
+    solved.forEach((p) => {
+      const ok = S.answers[p.id] === p.answer;
+      const a = by.get(p.subject) || [0, 0]; a[0] += ok; a[1]++; by.set(p.subject, a);
+      const t = tp.get(p.topic) || [0, 0, p.subject]; t[0] += ok; t[1]++; tp.set(p.topic, t);
+    });
+    const rows = [...by].sort((x, y) => x[1][0] / x[1][1] - y[1][0] / y[1][1]);
+    const worst = [...tp].filter(([, t]) => t[1] - t[0] > 0).sort((x, y) => (x[1][0] / x[1][1]) - (y[1][0] / y[1][1]) || (y[1][1] - x[1][1])).slice(0, 5);
+    const go = (sub) => { $("f-sub").value = sub; $("f-view").value = "wrong"; store.set("sub", sub); store.set("view", "wrong"); S.limit = 20; renderProblems(); };
+    const d = el("details", { class: "weak" }, el("summary", {}, "내 약점 분석 (푼 문제 " + solved.length + "개 기준)"),
+      el("div", { class: "bars" }, rows.map(([k, [ok, n]]) => {
+        const pct = Math.round(ok / n * 100);
+        const fill = el("span", { class: "fill" }); fill.style.width = pct + "%";
+        const lab = el("button", { type: "button", class: "linkish lab", title: k + " 틀린 문제 보기" }, k);
+        lab.addEventListener("click", () => go(k));
+        return el("div", { class: "bar" }, lab, el("span", { class: "track" }, fill), el("span", { class: "n" }, pct + "% · " + n));
+      })),
+      worst.length ? el("p", { class: "muted" }, "자주 틀리는 주제: ", ...worst.map(([k, t], i) => {
+        const b = el("button", { type: "button", class: "linkish" }, k + " (" + (t[1] - t[0]) + "/" + t[1] + ")");
+        b.addEventListener("click", () => go(t[2]));
+        return [i ? " · " : "", b];
+      }).flat()) : null);
+    if (store.get("weakOpen", false)) d.open = true;
+    d.addEventListener("toggle", () => store.set("weakOpen", d.open));
+    return d;
   }
 
   function visibleProblems() {
     const sub = $("f-sub").value, co = $("f-co").value, view = $("f-view").value;
+    if (S.focus) return S.problems.filter((p) => p.id === S.focus);
+    if (view === "review") {
+      const due = new Set(dueList().map((p) => p.id));
+      return S.problems.filter((p) => (due.has(p.id) || S.reviewPicks[p.id] !== undefined) && (!sub || p.subject === sub) && (!co || (p.company || "공통") === co));
+    }
     return S.problems.filter((p) => {
       if (sub && p.subject !== sub) return false;
       if (co && (p.company || "공통") !== co) return false;
@@ -384,6 +453,17 @@
       const again = el("button", { type: "button", class: "btn-ghost" }, "다시 풀기");
       again.addEventListener("click", () => { clearPick(p.id); renderProblems(); });
       foot.push(again);
+    }
+    if (mode === "solve") {
+      const sh = el("button", { type: "button", class: "btn-ghost" }, "공유");
+      sh.addEventListener("click", async () => {
+        const url = location.origin + location.pathname + "#q=" + encodeURIComponent(p.id);
+        try {
+          if (navigator.share) { await navigator.share({ title: "복기뱅크 " + p.id, text: p.subject + " · " + p.topic, url }); return; }
+          await navigator.clipboard.writeText(url); sh.textContent = "링크 복사됨";
+        } catch (e) { if (e && e.name !== "AbortError") { sh.textContent = url; } }
+      });
+      foot.unshift(sh);
     }
     let reportBox = null;
     if (reveal) {
@@ -429,24 +509,52 @@
   function renderProblems() {
     const done = S.problems.filter((p) => S.answers[p.id] !== undefined);
     const right = done.filter((p) => S.answers[p.id] === p.answer).length;
+    const due = dueList().length, st = streak(), td = S.daily[today()] || 0;
     $("score").textContent = S.problems.length
-      ? "푼 문제 " + done.length + " / " + S.problems.length + " · 정답 " + right + " · 오답 " + (done.length - right) + (S.user ? " · 기록 동기화 중" : " · 로그인하면 기록이 폰·PC에서 이어져요")
+      ? "푼 문제 " + done.length + " / " + S.problems.length + " · 정답 " + right + " · 오답 " + (done.length - right)
+        + (td ? " · 오늘 " + td + "문제" : "") + (st >= 2 ? " · " + st + "일 연속" : "")
+        + (S.user ? "" : " · 로그인하면 기록이 폰·PC에서 이어져요")
       : "";
+    const ro = [...$("f-view").options].find((o) => o.value === "review");
+    if (ro) ro.textContent = "오늘 복습할 문제 (" + due + ")";
+    const wp = $("weakbox"); if (wp) wp.replaceChildren(...[weakPanel()].filter(Boolean));
     if (!S.loaded) return;
     const list = visibleProblems();
+    const view = $("f-view").value;
+    if (S.focus) {
+      const all = el("button", { type: "button", class: "btn-line sm" }, "전체 문제 보기");
+      all.addEventListener("click", () => { S.focus = ""; history.replaceState(null, "", location.pathname); renderProblems(); });
+      $("qlist").replaceChildren(el("div", { class: "rule" }, "공유받은 문제예요. ", all),
+        ...(list.length ? list.map((p) => card(p, p.id, "solve", S.answers[p.id], (j) => { savePick(p.id, j); renderProblems(); }))
+                        : [el("div", { class: "empty" }, "이 문제를 찾을 수 없어요. 지금은 없거나 숨겨진 문제예요.")]));
+      return;
+    }
+    if (view === "review" && list.length) {
+      $("qlist").replaceChildren(
+        el("div", { class: "rule" }, "예전에 틀린 문제를 1일 · 3일 · 7일 뒤에 다시 보여줘요. 복습 날에 맞히면 다음 간격으로 넘어가고, 세 번 맞히면 졸업이에요."),
+        ...list.map((p) => card(p, p.id, "solve", S.reviewPicks[p.id], (j) => { S.reviewPicks[p.id] = j; savePick(p.id, j); renderProblems(); })));
+      return;
+    }
     if (!list.length) {
-      const view = $("f-view").value;
       const msg = !S.problems.length ? "아직 올라온 문제가 없어요."
+        : view === "review" ? "오늘 복습할 문제가 없어요. 틀린 문제는 다음 날부터 여기에 나와요."
         : view === "wrong" ? "틀린 문제가 없어요. 잘하고 있어요!"
         : view === "todo" ? "이 조건의 문제는 다 풀었어요. '전체 문제'로 바꿔서 해설을 다시 보거나 다른 과목을 골라보세요."
         : "이 조건에 맞는 문제가 없어요.";
       $("qlist").replaceChildren(el("div", { class: "empty" }, msg));
       return;
     }
-    $("qlist").replaceChildren(...list.map((p) => card(p, p.id, "solve", S.answers[p.id], (j) => { savePick(p.id, j); renderProblems(); })));
+    const shown = list.slice(0, S.limit);
+    const kids = shown.map((p) => card(p, p.id, "solve", S.answers[p.id], (j) => { savePick(p.id, j); renderProblems(); }));
+    if (list.length > shown.length) {
+      const more = el("button", { type: "button", class: "btn-line" }, "20문제 더 보기 (남은 " + (list.length - shown.length) + ")");
+      more.addEventListener("click", () => { S.limit += 20; renderProblems(); });
+      kids.push(el("div", { class: "toolbar end" }, more));
+    }
+    $("qlist").replaceChildren(...kids);
   }
   ["f-sub", "f-co", "f-view"].forEach((id) => $(id).addEventListener("change", () => {
-    store.set({ "f-sub": "sub", "f-co": "co", "f-view": "view" }[id], $(id).value); renderProblems();
+    store.set({ "f-sub": "sub", "f-co": "co", "f-view": "view" }[id], $(id).value); S.limit = 20; S.reviewPicks = {}; renderProblems();
   }));
   armButton($("reset"), "풀이 기록 지우기", "한 번 더 누르면 지워져요", () => {
     S.answers = {}; store.set("answers", S.answers);
@@ -1073,7 +1181,12 @@
   /* ================= start ================= */
   renderAccount();
   const hash = (location.hash || "").slice(1);
-  showTab(TABS.includes(hash) ? hash : (store.get("tab", "solve") || "solve"));
+  if (hash.startsWith("q=")) { S.focus = decodeURIComponent(hash.slice(2)); showTab("solve"); }
+  else showTab(TABS.includes(hash) ? hash : (store.get("tab", "solve") || "solve"));
+  window.addEventListener("hashchange", () => {
+    const h = (location.hash || "").slice(1);
+    if (h.startsWith("q=")) { S.focus = decodeURIComponent(h.slice(2)); showTab("solve"); renderProblems(); window.scrollTo({ top: 0 }); }
+  });
   loadProblems().then(() => { if (!$("p-mock").hidden && !S.mock) renderMockHome(); });
   if (sb) {
     sb.auth.getSession().then(({ data }) => onSession(data.session));
