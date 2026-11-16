@@ -82,6 +82,7 @@
   <nav class="tabs" role="tablist" aria-label="메뉴">
     <button class="tab" role="tab" data-tab="solve" aria-selected="true">문제 풀기</button>
     <button class="tab" role="tab" data-tab="mock" aria-selected="false">모의고사</button>
+    <button class="tab" role="tab" data-tab="cards" aria-selected="false">공식 암기</button>
     <button class="tab" role="tab" data-tab="trend" aria-selected="false">출제 경향</button>
     <button class="tab" role="tab" data-tab="recall" aria-selected="false">복기 남기기</button>
     <button class="tab" role="tab" data-tab="rank" aria-selected="false">랭킹</button>
@@ -96,6 +97,7 @@
         <option value="todo">안 푼 문제</option>
         <option value="wrong">틀린 문제 (오답노트)</option>
       </select>
+      <input id="f-q" type="search" placeholder="문제 검색 (예: 변압기, KEC)" aria-label="문제 검색" autocomplete="off">
     </div>
     <div class="scoreline" id="score"></div>
     <div id="weakbox"></div>
@@ -105,6 +107,10 @@
 
   <section id="p-mock" role="tabpanel" hidden>
     <div id="mock"></div>
+  </section>
+
+  <section id="p-cards" role="tabpanel" hidden>
+    <div id="cards"><div class="empty">공식 카드를 불러오는 중이에요…</div></div>
   </section>
 
   <section id="p-trend" role="tabpanel" hidden>
@@ -120,7 +126,7 @@
   </section>
 
   <footer>
-    <p>문제는 AI로 만들고 운영자가 검수해요. <span class="badge">검수 전</span> 표시가 붙은 문제는 아직 확인 중이니 해설을 참고만 하세요. 시험 문제 원문은 받지도 올리지도 않아요.</p>
+    <p>문제는 AI로 만들고 운영자가 검수해요. <span class="badge">검수 전</span> 표시가 붙은 문제는 아직 확인 중이니 해설을 참고만 하세요. 20명 넘게 풀고 정답률이 정상이면 '이상 없음'으로 바뀌어요. 시험 문제 원문은 받지도 올리지도 않아요.</p>
     <p id="updated"></p>
   </footer>
 </div>

@@ -127,16 +127,24 @@
     rev: store.get("rev", {}) || {},          // 틀린 문제 복습 일정 {id: {step, due}}
     daily: store.get("daily", {}) || {},      // 날짜별 푼 문제 수
     reviewPicks: {}, focus: "", limit: 20,
+    stars: store.get("stars", {}) || {},      // 별표한 문제
+    cardRev: store.get("cardRev", {}) || {},  // 공식 카드 복습 일정
+    stats: new Map(),                          // 문제별 다른 사람들 풀이 통계
     user: null, nickname: "", realName: "", isAdmin: false, verified: false,
     exams: null, mock: null, timer: null
   };
 
   /* ================= tabs ================= */
-  const TABS = ["solve", "mock", "trend", "recall", "rank"];
+  const TABS = ["solve", "mock", "cards", "trend", "recall", "rank"];
   function showTab(name) {
-    document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.setAttribute("aria-selected", String(t.dataset.tab === name));
+      if (t.dataset.tab === name && t.parentElement.scrollWidth > t.parentElement.clientWidth) t.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
     TABS.forEach((n) => { $("p-" + n).hidden = n !== name; });
     store.set("tab", name);
+    document.body.classList.remove("printing");
+    if (name === "cards") renderCards();
     if (name === "trend") renderTrend();
     if (name === "recall") renderRecall();
     if (name === "rank") renderRank();
@@ -361,6 +369,11 @@
         (hid || []).forEach((h) => S.hidden.set(h.problem_id, h));
       }
       S.problems = S.allProblems.filter((p) => !S.hidden.has(p.id));
+      if (sb) {
+        // 다른 사람들이 고른 보기 분포 (3명 이상 푼 문제만)
+        const { data: st } = await sb.rpc("problem_stats");
+        S.stats = new Map((st || []).map((r) => [r.problem_id, r]));
+      }
       if (j.updated) $("updated").textContent = "문제 업데이트: " + j.updated + " · 총 " + S.problems.length + "문제";
     } catch (e) {
       S.problems = [];
@@ -369,6 +382,7 @@
     S.loaded = true;
     buildFilters();
     renderProblems();
+    const sl = $("suspectlist"); if (sl) sl.replaceWith(suspectList());   // 운영자 화면이 먼저 열렸으면 통계를 받은 뒤 다시 그림
   }
 
   function buildFilters() {
@@ -385,6 +399,7 @@
     $("f-sub").value = subCount.has(s) ? s : "";
     $("f-co").value = coCount.has(c) ? c : "";
     if (![...$("f-view").options].some((o) => o.value === "review")) $("f-view").append(el("option", { value: "review" }, "오늘 복습할 문제"));
+    if (![...$("f-view").options].some((o) => o.value === "star")) $("f-view").append(el("option", { value: "star" }, "별표한 문제"));
     $("f-view").value = store.get("view", "all");
   }
 
@@ -419,27 +434,43 @@
     return d;
   }
 
+  const searchText = (p) => p._s || (p._s = nrm([p.id, p.subject, p.topic, p.q, ...(p.choices || []), p.explain || ""].join(" ")));
   function visibleProblems() {
     const sub = $("f-sub").value, co = $("f-co").value, view = $("f-view").value;
+    const q = nrm($("f-q") ? $("f-q").value : "");
     if (S.focus) return S.problems.filter((p) => p.id === S.focus);
+    const base = (p) => (!sub || p.subject === sub) && (!co || (p.company || "공통") === co) && (!q || searchText(p).includes(q));
     if (view === "review") {
       const due = new Set(dueList().map((p) => p.id));
-      return S.problems.filter((p) => (due.has(p.id) || S.reviewPicks[p.id] !== undefined) && (!sub || p.subject === sub) && (!co || (p.company || "공통") === co));
+      return S.problems.filter((p) => (due.has(p.id) || S.reviewPicks[p.id] !== undefined) && base(p));
     }
     return S.problems.filter((p) => {
-      if (sub && p.subject !== sub) return false;
-      if (co && (p.company || "공통") !== co) return false;
+      if (!base(p)) return false;
       const a = S.answers[p.id];
       if (view === "todo") return a === undefined;
       if (view === "wrong") return a !== undefined && a !== p.answer;
+      if (view === "star") return !!S.stars[p.id];
       return true;
     });
+  }
+
+  // 다른 사람들 풀이 통계: 5명 이상 푼 문제만 보여줘요
+  function statOf(p) {
+    const s = S.stats && S.stats.get(p.id);
+    if (!s || s.n < 5) return null;
+    const picks = s.picks || [];
+    const rate = (picks[p.answer] || 0) / s.n;
+    let wj = -1, wn = 0;
+    picks.forEach((c, j) => { if (j !== p.answer && c > wn) { wn = c; wj = j; } });
+    const suspect = s.n >= 8 && rate < 0.3 && wj >= 0 && wn / s.n >= 0.45;   // 한 오답에 몰리면 정답이 틀렸을 수 있어요
+    return { n: s.n, rate, wj, wshare: wn / s.n, suspect, healthy: s.n >= 20 && rate >= 0.3 && !suspect, picks };
   }
 
   function stars(n) { const k = Math.max(1, Math.min(3, Number(n) || 1)); return "●".repeat(k) + "○".repeat(3 - k); }
 
   // mode: solve(바로 채점) · exam(고르기만) · review(채점 결과 보기)
   function card(p, label, mode, chosen, onPick) {
+    const st = statOf(p);
     const reveal = mode === "review" || (mode === "solve" && chosen !== undefined);
     const choices = (p.choices || []).map((c, j) => {
       let cls = "choice";
@@ -457,6 +488,15 @@
       foot.push(again);
     }
     if (mode === "solve") {
+      const star = el("button", { type: "button", class: "btn-ghost star", "aria-pressed": String(!!S.stars[p.id]) }, S.stars[p.id] ? "★ 별표" : "☆ 별표");
+      star.addEventListener("click", () => {
+        if (S.stars[p.id]) delete S.stars[p.id]; else S.stars[p.id] = 1;
+        store.set("stars", S.stars);
+        star.textContent = S.stars[p.id] ? "★ 별표" : "☆ 별표"; star.setAttribute("aria-pressed", String(!!S.stars[p.id]));
+        updateStarCount();
+        if ($("f-view").value === "star") renderProblems();
+      });
+      foot.push(star);
       const sh = el("button", { type: "button", class: "btn-ghost" }, "공유");
       sh.addEventListener("click", async () => {
         const url = location.origin + location.pathname + "#q=" + encodeURIComponent(p.id);
@@ -496,18 +536,27 @@
         el("span", {}, [p.company && p.company !== "공통" && !p.basis ? p.company : null, p.subject, p.topic].filter(Boolean).join(" · ")),
         el("span", { class: "lv", title: "난이도" }, stars(p.level)),
         p.basis ? el("span", { class: "badge src" }, p.basis + (p.by ? " · " + p.by : "") + (p.source === "AI 자동 생성" ? " · 자동" : "")) : null,
-        p.reviewed ? el("span", { class: "badge ok" }, "검수 완료") : el("span", { class: "badge" }, "검수 전")),
+        p.reviewed ? el("span", { class: "badge ok" }, "검수 완료")
+          : st && st.healthy ? el("span", { class: "badge ok", title: "많은 사람이 풀었고 정답률이 정상이에요" }, st.n + "명 풀이 · 이상 없음")
+          : el("span", { class: "badge" }, "검수 전")),
       el("p", { class: "qtext" }, p.q || ""),
       el("ol", { class: "choices" }, choices),
       reveal ? el("div", { class: "explain" },
         chosen === undefined ? el("span", { class: "no" }, "안 푼 문제예요. 정답은 " + (p.answer + 1) + "번. ")
           : chosen === p.answer ? el("span", { class: "ok" }, "정답이에요. ") : el("span", { class: "no" }, "오답이에요. 정답은 " + (p.answer + 1) + "번. "),
         p.explain || "") : null,
+      reveal && st ? el("div", { class: "stat" }, "푼 사람 " + st.n + "명 · 정답률 " + Math.round(st.rate * 100) + "%"
+        + (st.wj >= 0 && st.wshare >= 0.25 ? " · 많이 고른 오답 " + (st.wj + 1) + "번 (" + Math.round(st.wshare * 100) + "%)" : "")) : null,
+      reveal && st && st.suspect ? el("div", { class: "warnline" }, "주의: 많은 사람이 " + (st.wj + 1) + "번을 골랐어요. 정답이 틀렸을 수도 있으니 해설을 꼭 확인하고, 이상하면 '오류 신고'를 눌러주세요.") : null,
       foot.length ? el("div", { class: "qfoot" }, foot) : null,
       reportBox
     );
   }
 
+  function updateStarCount() {
+    const so = [...$("f-view").options].find((o) => o.value === "star");
+    if (so) so.textContent = "별표한 문제 (" + S.problems.filter((p) => S.stars[p.id]).length + ")";
+  }
   function renderProblems() {
     const done = S.problems.filter((p) => S.answers[p.id] !== undefined);
     const right = done.filter((p) => S.answers[p.id] === p.answer).length;
@@ -519,6 +568,7 @@
       : "";
     const ro = [...$("f-view").options].find((o) => o.value === "review");
     if (ro) ro.textContent = "오늘 복습할 문제 (" + due + ")";
+    updateStarCount();
     const wp = $("weakbox"); if (wp) wp.replaceChildren(...[weakPanel()].filter(Boolean));
     if (!S.loaded) return;
     const list = visibleProblems();
@@ -538,7 +588,10 @@
       return;
     }
     if (!list.length) {
+      const qv = $("f-q") ? $("f-q").value.trim() : "";
       const msg = !S.problems.length ? "아직 올라온 문제가 없어요."
+        : qv ? "'" + qv + "'이(가) 들어간 문제가 없어요. 다른 낱말로 찾거나 과목·범위를 '전체'로 바꿔보세요."
+        : view === "star" ? "별표한 문제가 없어요. 다시 보고 싶은 문제에서 '☆ 별표'를 누르세요."
         : view === "review" ? "오늘 복습할 문제가 없어요. 틀린 문제는 다음 날부터 여기에 나와요."
         : view === "wrong" ? "틀린 문제가 없어요. 잘하고 있어요!"
         : view === "todo" ? "이 조건의 문제는 다 풀었어요. '전체 문제'로 바꿔서 해설을 다시 보거나 다른 과목을 골라보세요."
@@ -555,6 +608,8 @@
     }
     $("qlist").replaceChildren(...kids);
   }
+  let searchT = 0;
+  if ($("f-q")) $("f-q").addEventListener("input", () => { clearTimeout(searchT); searchT = setTimeout(() => { S.limit = 20; renderProblems(); }, 200); });
   ["f-sub", "f-co", "f-view"].forEach((id) => $(id).addEventListener("change", () => {
     store.set({ "f-sub": "sub", "f-co": "co", "f-view": "view" }[id], $(id).value); S.limit = 20; S.reviewPicks = {}; renderProblems();
   }));
@@ -980,7 +1035,7 @@
     const reloadSessAdmin = () => { if (sessAdmin) loadSessAdmin(sessAdmin, () => { loadAdmin(admin); refreshAdminCounts(); }); };
     box.replaceChildren(
       ...(S.isAdmin ? [el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin, el("h2", {}, "운영자 · 시험 회차"), sessAdmin,
-                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 숨긴 문제"), hiddenList(), el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
+                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 정답 확인 필요 (자동 감지)"), suspectList(), el("h2", {}, "운영자 · 숨긴 문제"), hiddenList(), el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
       el("div", { class: "panel" }, el("h2", {}, "복기 남기기"), el("h3", { class: "rhead" }, "시험 보고 나오면 이렇게"), postExamSteps(), rules), form, el("h2", {}, "내가 올린 복기"), mine);
     loadMine(mine);
     if (admin) loadAdmin(admin);
@@ -1023,6 +1078,34 @@
           r.note ? el("div", { class: "note" }, r.note) : null,
           el("div", { class: "actions" }, hide, done));
       }));
+  }
+
+  // 정답률이 낮고 한 오답에 몰린 문제: 신고가 없어도 운영자에게 보여줘요
+  function suspectList() {
+    const okSet = store.get("statOk", {}) || {};
+    const items = S.problems.map((p) => ({ p, st: statOf(p) })).filter((x) => x.st && x.st.suspect && !okSet[x.p.id]);
+    const box = el("div", { class: "list", id: "suspectlist" });
+    const redraw = () => { const b = $("suspectlist"); if (b) b.replaceWith(suspectList()); };
+    if (!items.length) return el("div", { class: "empty", id: "suspectlist" }, "지금은 의심되는 문제가 없어요. 8명 이상 풀었는데 정답률 30% 미만이고 한 오답에 45% 넘게 몰리면 여기에 떠요.");
+    box.append(el("p", { class: "muted" }, "푼 사람들이 한 오답에 몰린 문제예요. 정답이 정말 틀렸으면 '문제 숨기기', 그냥 어려운 문제면 '괜찮음'을 누르세요."));
+    items.forEach(({ p, st }) => {
+      const hide = el("button", { type: "button", class: "btn sm" }, "문제 숨기기");
+      armButton(hide, "문제 숨기기", "한 번 더 누르면 숨겨요", async () => {
+        const { error } = await sb.rpc("admin_hide_problem", { pid: p.id, why: "정답률 낮음 (자동 감지)" });
+        if (error) { hide.textContent = "숨기지 못했어요"; return; }
+        await loadProblems(); redraw();
+        const hl = $("hiddenlist"); if (hl) hl.replaceWith(hiddenList());
+      });
+      const ok = el("button", { type: "button", class: "btn-line sm" }, "괜찮음");
+      ok.addEventListener("click", () => { okSet[p.id] = 1; store.set("statOk", okSet); redraw(); });
+      box.append(el("article", { class: "rec" },
+        el("div", { class: "meta" }, [p.id, p.subject, p.topic].join(" · ")),
+        el("div", { class: "topic" }, (p.q || "").slice(0, 90) + ((p.q || "").length > 90 ? "…" : "")),
+        el("div", { class: "note" }, "푼 사람 " + st.n + "명 · 정답(" + (p.answer + 1) + "번) " + Math.round(st.rate * 100) + "% · "
+          + st.picks.slice(0, (p.choices || []).length).map((c, j) => (j + 1) + "번 " + Math.round(c / st.n * 100) + "%").join(" / ")),
+        el("div", { class: "actions" }, hide, ok)));
+    });
+    return box;
   }
 
   function hiddenList() {
@@ -1243,7 +1326,23 @@
     return subs.map(([s, n]) => [s, n / total]);
   }
 
+  // 내 약점 모의고사: 틀린 문제 + 정답률 낮은 과목 위주 20문항
+  function buildWeak() {
+    const acc = new Map();
+    S.problems.forEach((p) => { const a = S.answers[p.id]; if (a === undefined) return; const v = acc.get(p.subject) || [0, 0]; v[1]++; if (a === p.answer) v[0]++; acc.set(p.subject, v); });
+    const weakSubs = [...acc].filter(([, v]) => v[1] >= 3).sort((x, y) => x[1][0] / x[1][1] - y[1][0] / y[1][1]).slice(0, 3).map((x) => x[0]);
+    const used = new Set(), pick = [];
+    const take = (arr, max) => { for (const p of arr) { if (pick.length >= max) break; if (!used.has(p.id)) { used.add(p.id); pick.push(p); } } };
+    take(shuffle(S.problems.filter((p) => S.answers[p.id] !== undefined && S.answers[p.id] !== p.answer)), 8);
+    take(shuffle(S.problems.filter((p) => weakSubs.includes(p.subject) && S.answers[p.id] === undefined)), 20);
+    take(shuffle(S.problems.filter((p) => weakSubs.includes(p.subject))), 20);
+    take(shuffle(S.problems.filter((p) => S.answers[p.id] === undefined && p.subject !== "한국사")), 20);
+    pick.sort((a, b) => subjRank(a.subject) - subjRank(b.subject));
+    return [{ name: "약점 집중" + (weakSubs.length ? " (" + weakSubs.join("·") + ")" : ""), want: 20, items: pick }];
+  }
+
   async function buildExam(exam) {
+    if (exam.weak) return buildWeak();
     if (exam.session) {   // 시험 회차 변형 모의고사: 그 회차 복기로 만든 문제를 복기 번호 순서대로
       const items = S.problems.filter((p) => p.session === exam.session).sort((a, b) => (a.qno || 999) - (b.qno || 999));
       return [{ name: "변형 문제", want: items.length, items }];
@@ -1283,6 +1382,8 @@
       const total = e.sections.reduce((a, s) => a + s.count, 0);
       const b = el("button", { type: "button", class: "btn" }, "시작하기");
       b.addEventListener("click", () => startMock(e));
+      const pr = el("button", { type: "button", class: "btn-ghost" }, "시험지 인쇄");
+      pr.addEventListener("click", () => printExam(e));
       const mine = S.problems.filter((p) => p.company === e.company).length;
       return el("article", { class: "mockcard" },
         el("h3", {}, e.company),
@@ -1290,7 +1391,7 @@
         el("div", { class: "muted" }, "이 기업 복기 기반 문제 " + mine + "개 우선 출제, 나머지는 이 기업 출제 비중대로 채워요."),
         e.note ? el("div", { class: "muted" }, e.note) : null,
         best[e.company] ? el("div", { class: "best" }, "최고 " + best[e.company].score + " / " + best[e.company].total) : null,
-        b);
+        el("div", { class: "actions" }, b, pr));
     });
     const ss = await loadSessions();
     const withP = ss.map((x) => ({ x, n: S.problems.filter((p) => p.session === x.id).length }));
@@ -1304,10 +1405,24 @@
         best[key] ? el("div", { class: "best" }, "최고 " + best[key].score + " / " + best[key].total) : null, b);
     });
     const waiting = withP.filter((o) => !o.n && Number(o.x.recalls) > 0).length;
+    const solvedN = S.problems.filter((p) => S.answers[p.id] !== undefined).length;
+    let weakCard = null;
+    if (solvedN >= 10) {
+      const wexam = { company: "내 약점", weak: true, noRank: true, sections: [{ name: "약점 집중", count: 20 }] };
+      const wb = el("button", { type: "button", class: "btn" }, "시작하기");
+      wb.addEventListener("click", () => startMock(wexam));
+      const wp = el("button", { type: "button", class: "btn-ghost" }, "시험지 인쇄");
+      wp.addEventListener("click", () => printExam(wexam));
+      weakCard = el("article", { class: "mockcard weakcard" }, el("h3", {}, "내 약점 모의고사"),
+        el("div", { class: "sec" }, "20문항 · 풀 때마다 새로 뽑아요"),
+        el("div", { class: "muted" }, "틀린 문제와 정답률이 낮은 과목 위주로 골라요. 푼 문제 " + solvedN + "개 기준."),
+        el("div", { class: "actions" }, wb, wp));
+    }
     put(box,
       sessCards.length || waiting ? el("h2", {}, "시험 회차 변형 모의고사") : null,
       waiting ? el("p", { class: "muted" }, "복기가 모인 회차 " + waiting + "개는 매일 오전 9시에 차례로 문제가 만들어지고 있어요.") : null,
       sessCards.length ? el("div", { class: "mockgrid" }, sessCards) : null,
+      weakCard ? el("div", { class: "mockgrid" }, weakCard) : null,
       el("div", { class: "panel" }, el("h2", {}, "회사별 실전 모의고사"),
         el("p", {}, "실제 시험처럼 끝까지 풀고 한 번에 채점해요. 시간을 재고, 과목별 점수와 틀린 문제 해설을 보여줘요."),
         el("p", { class: "muted" }, ex.basis || "")),
@@ -1316,7 +1431,7 @@
 
   async function startMock(exam) {
     const sections = await buildExam(exam);
-    S.mock = { exam, sections, picks: {}, start: Date.now(), done: false };
+    S.mock = { exam, sections, picks: {}, times: {}, start: Date.now(), last: Date.now(), done: false };
     clearInterval(S.timer);
     S.timer = setInterval(updateTimer, 1000);
     renderMock();
@@ -1340,7 +1455,11 @@
       body.push(el("div", { class: "sechead" }, s.name + " " + s.items.length + "문항" + (s.items.length < s.want ? " (실제 " + s.want + "문항 중 준비된 문제만 출제)" : "")));
       s.items.forEach((p) => {
         n++;
-        body.push(card(p, String(n).padStart(2, "0"), "exam", m.picks[p.id], (j) => { m.picks[p.id] = j; renderMock(); }));
+        body.push(card(p, String(n).padStart(2, "0"), "exam", m.picks[p.id], (j) => {
+          // 문항 시간: 앞 문제를 고른 뒤부터 이 문제를 처음 고를 때까지
+          if (m.picks[p.id] === undefined) { const now = Date.now(); m.times[p.id] = now - m.last; m.last = now; }
+          m.picks[p.id] = j; renderMock();
+        }));
       });
     });
     box.replaceChildren(
@@ -1369,24 +1488,167 @@
     items.forEach((p) => { const v = bySub.get(p.subject) || [0, 0]; v[1]++; if (m.picks[p.id] === p.answer) v[0]++; bySub.set(p.subject, v); });
     const back = el("button", { type: "button", class: "btn-line" }, "모의고사 목록");
     back.addEventListener("click", () => { S.mock = null; renderMockHome(); window.scrollTo({ top: 0 }); });
-    const again = el("button", { type: "button", class: "btn" }, "같은 회사 다시 풀기");
+    const again = el("button", { type: "button", class: "btn" }, m.exam.weak ? "새 약점 모의고사" : "다시 풀기");
     again.addEventListener("click", () => startMock(m.exam));
     let n = 0;
     const numbered = items.map((p) => ({ p, no: ++n }));
     const wrong = numbered.filter(({ p }) => m.picks[p.id] !== p.answer);
-    $("mock").replaceChildren(
+    // 풀이 시간 분석
+    const TARGET = 45;
+    const tms = numbered.filter(({ p }) => m.times[p.id] != null).map(({ p, no }) => ({ p, no, s: m.times[p.id] / 1000 }));
+    let timeBox = null;
+    if (tms.length) {
+      const avg = tms.reduce((a, x) => a + x.s, 0) / tms.length;
+      const subT = new Map();
+      tms.forEach(({ p, s: t }) => { const v = subT.get(p.subject) || [0, 0]; v[0] += t; v[1]++; subT.set(p.subject, v); });
+      const slow = tms.slice().sort((a, b) => b.s - a.s).slice(0, 5);
+      timeBox = el("div", { class: "timebox" },
+        el("h3", {}, "풀이 시간"),
+        el("p", {}, "문항당 평균 ", el("b", {}, Math.round(avg) + "초"), " · 목표 " + TARGET + "초" + (avg <= TARGET ? " 안쪽이에요. 좋아요!" : "보다 " + Math.round(avg - TARGET) + "초 느려요.")),
+        el("div", { class: "bars" }, [...subT].sort((a, b) => subjRank(a[0]) - subjRank(b[0])).map(([k, [t, c]]) => {
+          const sec = t / c, fill = el("span", { class: "fill" + (sec > TARGET ? " over" : "") });
+          fill.style.width = Math.min(100, sec / (TARGET * 2) * 100) + "%";
+          return el("div", { class: "bar" }, el("span", { class: "lab" }, k), el("span", { class: "track" }, fill), el("span", { class: "n" }, Math.round(sec) + "초"));
+        })),
+        el("p", { class: "muted" }, "오래 걸린 문제: " + slow.map(({ p, no, s: t }) => no + "번 " + p.topic + " " + Math.round(t) + "초" + (m.picks[p.id] === p.answer ? "" : " (오답)")).join(" · ")),
+        el("p", { class: "muted" }, "전공은 한 문제를 40~50초 안에 푸는 연습이 필요하다는 합격 후기가 많아요. 문항 시간은 앞 문제를 고른 뒤부터 이 문제를 고를 때까지로 재요."));
+    }
+    // 다른 응시자와 비교
+    let rankBox = null;
+    if (!m.exam.noRank && sb && items.length >= 5) {
+      rankBox = el("p", { class: "rankline" }, "다른 응시자와 비교하는 중…");
+      (async () => {
+        const k = String(m.exam.company).slice(0, 60);
+        if (S.user) await sb.rpc("submit_mock", { k, s: right, t: items.length, secs: Math.min(36000, Math.round(elapsed / 1000)) });
+        const { data, error } = await sb.rpc("mock_rank", { k, ratio: right / items.length });
+        const r = data && data[0];
+        if (error || !r) { rankBox.textContent = ""; return; }
+        rankBox.textContent = r.others >= 4
+          ? "이 모의고사 응시자 " + (r.others + 1) + "명 중 " + (r.higher + 1) + "등 · 상위 " + Math.max(1, Math.ceil((r.higher + 1) / (r.others + 1) * 100)) + "%"
+            + (S.user ? "" : " (로그인하면 내 기록도 순위에 들어가요)")
+          : "아직 이 모의고사 응시자가 적어요 (" + r.others + "명). 더 모이면 상위 몇 %인지 보여드려요." + (S.user ? "" : " 로그인하면 내 기록도 들어가요.");
+      })();
+    }
+    put($("mock"),
       el("div", { class: "result" },
         el("h2", {}, m.exam.company + " 모의고사 결과"),
         el("div", { class: "big" }, right + " / " + items.length),
         el("p", {}, "정답률 " + Math.round(right / Math.max(1, items.length) * 100) + "% · 걸린 시간 " + fmt(elapsed)),
+        rankBox,
         el("div", { class: "bars" }, [...bySub].sort((a, b) => subjRank(a[0]) - subjRank(b[0])).map(([s, [r, t]]) => {
           const fill = el("span", { class: "fill" }); fill.style.width = (r / t * 100) + "%";
           return el("div", { class: "bar" }, el("span", { class: "lab" }, s), el("span", { class: "track" }, fill), el("span", { class: "n" }, r + "/" + t));
         })),
         el("div", { class: "actions" }, again, back)),
+      timeBox,
       el("h2", {}, wrong.length ? "틀리거나 안 푼 문제 " + wrong.length + "개" : "전부 맞혔어요!"),
       el("div", { class: "list" }, wrong.map(({ p, no }) => card(p, String(no).padStart(2, "0") + " · " + p.id, "review", m.picks[p.id]))));
     window.scrollTo({ top: 0 });
+  }
+
+  // 시험지 인쇄: 문제지 + 마지막 장에 정답·해설
+  async function printExam(exam) {
+    const sections = await buildExam(exam);
+    const items = sections.flatMap((x) => x.items);
+    const circ = ["①", "②", "③", "④", "⑤"];
+    const back = el("button", { type: "button", class: "btn-line" }, "모의고사 목록");
+    back.addEventListener("click", () => { document.body.classList.remove("printing"); renderMockHome(); window.scrollTo({ top: 0 }); });
+    const pr = el("button", { type: "button", class: "btn" }, "인쇄하기 / PDF 저장");
+    pr.addEventListener("click", () => window.print());
+    let n = 0;
+    document.body.classList.add("printing");
+    put($("mock"),
+      el("div", { class: "panel noprint" },
+        el("p", {}, "아래 시험지를 인쇄하거나, 인쇄 창에서 'PDF로 저장'을 고르면 파일로 받을 수 있어요. 정답과 해설은 마지막 장에 있어요. 누를 때마다 문제를 새로 뽑아요."),
+        el("div", { class: "actions" }, pr, back)),
+      el("div", { class: "sheet" },
+        el("div", { class: "sheethead" }, el("b", {}, exam.company + " 모의고사"), el("span", {}, items.length + "문항 · 이름 __________ · 점수 _____ / " + items.length)),
+        sections.map((sec) => el("section", { class: "sheetsec" }, el("h3", {}, sec.name),
+          sec.items.map((p) => { n++; return el("div", { class: "pq" }, el("p", { class: "pqt" }, el("b", {}, n + ". "), p.q || ""), el("ol", { class: "pch" }, (p.choices || []).map((c, j) => el("li", {}, circ[j] + " " + c)))); }))),
+        el("div", { class: "answers" }, el("h3", {}, "정답과 해설"),
+          el("p", { class: "akey" }, items.map((p, i) => (i + 1) + "-" + circ[p.answer]).join("  ")),
+          items.map((p, i) => el("p", { class: "pa" }, el("b", {}, (i + 1) + ". " + circ[p.answer] + " "), p.explain || "")))));
+    window.scrollTo({ top: 0 });
+  }
+
+  /* ================= 공식 암기 카드 ================= */
+  let CARDS = null, cardDeck = null, cardIdx = 0, cardFlip = false;
+  let cardSub = store.get("cardSub", ""), cardMode = store.get("cardMode", "today");
+  async function loadCards() {
+    if (CARDS) return CARDS;
+    try { const r = await fetch("data/formulas.json", { cache: "no-cache" }); CARDS = (await r.json()).cards || []; }
+    catch (e) { CARDS = []; }
+    return CARDS;
+  }
+  const cardDue = (c) => { const r = S.cardRev[c.id]; return !!r && !r.done && r.due <= Date.now(); };
+  const cardHard = (c) => { const r = S.cardRev[c.id]; return !!r && !r.done && r.step === 0; };
+  function makeDeck(all) {
+    const pool = all.filter((c) => !cardSub || c.subject === cardSub);
+    if (cardMode === "all") return pool;
+    if (cardMode === "hard") return pool.filter(cardHard);
+    return pool.filter(cardDue).concat(pool.filter((c) => !S.cardRev[c.id]).slice(0, 10));   // 오늘: 복습 + 새 카드 10장
+  }
+  function gradeCard(c, ok) {
+    const r = S.cardRev[c.id], now = Date.now();
+    if (!ok) S.cardRev[c.id] = { step: 0, due: now + DAY };
+    else { const step = r && !r.done ? r.step + 1 : 1; S.cardRev[c.id] = step >= GAPS.length ? { done: true, step } : { step, due: now + GAPS[step] * DAY }; }
+    store.set("cardRev", S.cardRev);
+  }
+  async function renderCards() {
+    const box = $("cards");
+    const all = await loadCards();
+    if (!all.length) { put(box, el("div", { class: "empty" }, "공식 카드를 불러오지 못했어요. 새로고침해 주세요.")); return; }
+    if (!cardDeck) { cardDeck = makeDeck(all); cardIdx = 0; cardFlip = false; }
+    const inSub = (c) => !cardSub || c.subject === cardSub;
+    const subs = [...new Set(all.map((c) => c.subject))];
+    const sSel = el("select", { "aria-label": "과목" }, el("option", { value: "" }, "전체 과목 (" + all.length + ")"),
+      subs.map((x) => el("option", { value: x }, x + " (" + all.filter((c) => c.subject === x).length + ")")));
+    sSel.value = subs.includes(cardSub) ? cardSub : "";
+    const dueN = all.filter((c) => inSub(c) && cardDue(c)).length, newN = all.filter((c) => inSub(c) && !S.cardRev[c.id]).length;
+    const mSel = el("select", { "aria-label": "카드 범위" },
+      el("option", { value: "today" }, "오늘 볼 카드 (복습 " + dueN + " + 새 카드 " + Math.min(10, newN) + ")"),
+      el("option", { value: "hard" }, "헷갈리는 카드 (" + all.filter((c) => inSub(c) && cardHard(c)).length + ")"),
+      el("option", { value: "all" }, "전체 카드 차례대로"),
+      el("option", { value: "list" }, "한눈에 보기 (목록)"));
+    mSel.value = cardMode;
+    const reset = () => { cardDeck = null; renderCards(); };
+    sSel.addEventListener("change", () => { cardSub = sSel.value; store.set("cardSub", cardSub); reset(); });
+    mSel.addEventListener("change", () => { cardMode = mSel.value; store.set("cardMode", cardMode); reset(); });
+    const doneN = all.filter((c) => S.cardRev[c.id] && S.cardRev[c.id].done).length;
+    const head = [el("div", { class: "toolbar" }, sSel, mSel),
+      el("div", { class: "scoreline" }, "외운 카드 " + doneN + " / " + all.length + " · '알았어요' 세 번이면 졸업, 헷갈린 카드는 내일 다시")];
+    if (cardMode === "list") {
+      put(box, ...head, el("div", { class: "list" }, all.filter(inSub).map((c) => el("article", { class: "fcard flat" },
+        el("div", { class: "meta" }, c.subject), el("h3", {}, c.front), el("div", { class: "fback" }, c.back), c.tip ? el("p", { class: "ftip" }, c.tip) : null))));
+      return;
+    }
+    if (cardIdx >= cardDeck.length) {
+      const again = el("button", { type: "button", class: "btn" }, "다시 섞어서 보기");
+      again.addEventListener("click", reset);
+      const list = el("button", { type: "button", class: "btn-line" }, "한눈에 보기");
+      list.addEventListener("click", () => { cardMode = "list"; store.set("cardMode", "list"); reset(); });
+      put(box, ...head, el("div", { class: "panel" },
+        el("h2", {}, cardDeck.length ? "다 봤어요!" : "지금 볼 카드가 없어요"),
+        el("p", {}, cardDeck.length ? cardDeck.length + "장을 봤어요. 헷갈린 카드는 내일, 안 카드는 3일·7일 뒤에 다시 나와요." : "오늘 복습할 카드가 없어요. 다른 과목이나 '전체 카드'를 골라보세요."),
+        el("div", { class: "actions" }, again, list)));
+      return;
+    }
+    const c = cardDeck[cardIdx];
+    const face = el("div", { class: "fcard" + (cardFlip ? " open" : ""), role: "button", tabindex: "0", "aria-label": cardFlip ? "앞면으로 뒤집기" : "답 확인하기" },
+      el("div", { class: "meta" }, c.subject + " · " + (cardIdx + 1) + " / " + cardDeck.length),
+      el("h3", {}, c.front),
+      cardFlip ? el("div", { class: "fback" }, c.back) : el("p", { class: "muted" }, "공식을 먼저 떠올려 보고, 눌러서 확인하세요"),
+      cardFlip && c.tip ? el("p", { class: "ftip" }, c.tip) : null);
+    const flip = () => { cardFlip = !cardFlip; renderCards(); };
+    face.addEventListener("click", flip);
+    face.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+    const next = (ok) => { gradeCard(c, ok); cardIdx++; cardFlip = false; renderCards(); };
+    const no = el("button", { type: "button", class: "btn-line" }, "헷갈려요");
+    no.addEventListener("click", () => next(false));
+    const yes = el("button", { type: "button", class: "btn" }, "알았어요");
+    yes.addEventListener("click", () => next(true));
+    put(box, ...head, face, cardFlip ? el("div", { class: "actions cardbtns" }, no, yes) : null);
+    if (cardFlip) yes.focus({ preventScroll: true }); else face.focus({ preventScroll: true });
   }
 
   /* ================= start ================= */
