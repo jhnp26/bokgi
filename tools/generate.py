@@ -347,6 +347,62 @@ def make_problem(rec, ask, bank=()):
     return None, ("accepted", "검산이 맞지 않아 문제는 보류했어요")
 
 
+# ---------------------------------------------------------------- 정답 재검증
+RECHECK_MAX = int(os.environ.get("BOKGI_RECHECK") or 5)   # 하루에 다시 풀어볼 의심 문제 수
+
+
+def recheck_suspects(bank, ask, log):
+    """사이트 풀이 통계에서 한 오답에 사람이 몰린 문제를 AI가 두 번 다시 풀어 본다.
+    두 번 다 저장된 정답과 같으면 '확인됨'으로 표시, 하나라도 다르면 사이트에서 숨긴다 (운영자가 숨김 풀기 가능).
+    운영자가 숨김을 풀어 둔 문제는 다시 건드리지 않는다. 바뀐 게 있으면 True."""
+    token = clean_secret("BOKGI_BOT_TOKEN")
+    try:
+        stats = sb_request("POST", "/rest/v1/rpc/problem_stats", {}) or []
+        hidden = {r["problem_id"] for r in (sb_request("GET", "/rest/v1/hidden_problems?select=problem_id") or [])}
+    except (urllib.error.URLError, ValueError) as e:
+        print("풀이 통계를 읽지 못해 재검증은 건너뜀:", e)
+        return False
+    by = {p["id"]: p for p in bank["problems"]}
+    changed, cand = False, []
+    for st in stats:
+        p, n, picks = by.get(st.get("problem_id")), int(st.get("n") or 0), st.get("picks") or []
+        if not p or p.get("reviewed") or p["id"] in hidden or n < 8 or len(picks) <= p["answer"]:
+            continue
+        rc = p.get("recheck") or {}
+        if rc.get("ok") is False and not rc.get("kept"):
+            rc["kept"] = True                     # AI가 숨겼는데 운영자가 다시 보이게 함 → 운영자 판단을 따름
+            p["recheck"], changed = rc, True
+        if rc.get("kept") or (rc and n < 2 * int(rc.get("n") or 0)):
+            continue                              # 이미 확인함 (푼 사람이 두 배로 늘면 다시 확인)
+        rate = picks[p["answer"]] / n
+        wn, wj = max((c, j) for j, c in enumerate(picks) if j != p["answer"])
+        if rate < 0.3 and wn / n >= 0.45:
+            cand.append((p, n, wj))
+    print("재검증 대상 %d개 (오늘 최대 %d개)" % (len(cand), RECHECK_MAX))
+    for p, n, wj in cand[:RECHECK_MAX]:
+        listing = "\n".join("%d) %s" % (i, c) for i, c in enumerate(p["choices"]))
+        answers = []
+        for _ in range(2):
+            v = parse_json(ask([{"role": "system", "content": VERIFY_SYSTEM},
+                                {"role": "user", "content": "아래 문제를 직접 풀어라.\n\n%s\n\n%s\n\n<제시된 해설>\n%s\n</제시된 해설>"
+                                 % (p["q"], listing, p["explain"])}]))
+            answers.append(v.get("answer"))
+        ok = all(a == p["answer"] for a in answers)
+        day = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d")
+        p["recheck"] = {"n": n, "at": day, "ok": ok, "ai": answers}
+        changed = True
+        if ok:
+            print("  재검증 통과:", p["id"], "(사람들은 %d번에 몰렸지만 정답 %d번이 맞음)" % (wj + 1, p["answer"] + 1))
+            continue
+        why = "AI 재검증: 정답 불일치 (저장된 정답 %d번, AI %s, 많이 고른 답 %d번)" % (
+            p["answer"] + 1, "·".join(str(a + 1) if isinstance(a, int) else "?" for a in answers), wj + 1)
+        print("  숨김:", p["id"], why)
+        log.setdefault("hidden", []).append(p["id"])
+        if token and not MARK_DRY:
+            sb_request("POST", "/rest/v1/rpc/bot_hide_problem", {"token": token, "pid": p["id"], "why": why})
+    return changed
+
+
 # ---------------------------------------------------------------- 메인
 def next_id(problems, subject):
     prefix = next((v for k, v in PREFIX.items() if k in subject), "GN")
@@ -462,6 +518,16 @@ def main():
         log["added"].append(pid)
         print("추가:", pid, rec["subject"], "/", rec["topic"], ("by " + rec["by"]) if rec.get("by") else "(학과 복기)")
 
+    rechecked = False
+    if not args.fake and not str(log["note"]).startswith("AI 사용 불가"):
+        try:
+            rechecked = recheck_suspects(bank, ask, log)
+        except AIUnavailable as e:
+            print("AI 사용 불가로 재검증은 다음 실행에:", e)
+        except (ValueError, KeyError) as e:
+            print("재검증 중 응답 해석 실패:", e)
+    if rechecked and not log["added"]:
+        save_json(PROBLEMS, bank)
     if log["added"]:
         bank["updated"] = now.astimezone(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d")
         save_json(PROBLEMS, bank)

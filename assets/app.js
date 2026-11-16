@@ -462,8 +462,11 @@
     const rate = (picks[p.answer] || 0) / s.n;
     let wj = -1, wn = 0;
     picks.forEach((c, j) => { if (j !== p.answer && c > wn) { wn = c; wj = j; } });
-    const suspect = s.n >= 8 && rate < 0.3 && wj >= 0 && wn / s.n >= 0.45;   // 한 오답에 몰리면 정답이 틀렸을 수 있어요
-    return { n: s.n, rate, wj, wshare: wn / s.n, suspect, healthy: s.n >= 20 && rate >= 0.3 && !suspect, picks };
+    let suspect = s.n >= 8 && rate < 0.3 && wj >= 0 && wn / s.n >= 0.45;   // 한 오답에 몰리면 정답이 틀렸을 수 있어요
+    const rc = p.recheck;                                                    // 매일 자동 실행에서 AI가 다시 풀어 본 결과
+    const confirmed = !!(rc && rc.ok && s.n < 2 * (rc.n || 0));
+    if (confirmed) suspect = false;
+    return { n: s.n, rate, wj, wshare: wn / s.n, suspect, confirmed, healthy: s.n >= 20 && rate >= 0.3 && !suspect, picks };
   }
 
   function stars(n) { const k = Math.max(1, Math.min(3, Number(n) || 1)); return "●".repeat(k) + "○".repeat(3 - k); }
@@ -482,6 +485,11 @@
       return el("li", {}, b);
     });
     const foot = [];
+    if (mode === "solve" && reveal && chosen !== undefined && chosen !== p.answer && !S.related) {
+      const more = el("button", { type: "button", class: "btn-line sm" }, "비슷한 문제 3개 더");
+      more.addEventListener("click", () => { S.related = p.id; renderProblems(); window.scrollTo({ top: 0 }); });
+      foot.push(more);
+    }
     if (mode === "solve" && reveal) {
       const again = el("button", { type: "button", class: "btn-ghost" }, "다시 풀기");
       again.addEventListener("click", () => { clearPick(p.id); renderProblems(); });
@@ -530,11 +538,13 @@
         reportBox.hidden = false;
       });
     }
-    return el("article", { class: "q" },
+    const art = el("article", { class: "q", "data-qid": p.id, "data-answered": chosen !== undefined ? "1" : "0" },
       el("div", { class: "meta" },
         el("span", { class: "qid" }, label),
         el("span", {}, [p.company && p.company !== "공통" && !p.basis ? p.company : null, p.subject, p.topic].filter(Boolean).join(" · ")),
-        el("span", { class: "lv", title: "난이도" }, stars(p.level)),
+        st && st.n >= 10
+          ? el("span", { class: "lv", title: "난이도 (실제 정답률 " + Math.round(st.rate * 100) + "% 기준)" }, stars(st.rate >= 0.7 ? 1 : st.rate >= 0.4 ? 2 : 3))
+          : el("span", { class: "lv", title: "난이도 (AI 추정)" }, stars(p.level)),
         p.basis ? el("span", { class: "badge src" }, p.basis + (p.by ? " · " + p.by : "") + (p.source === "AI 자동 생성" ? " · 자동" : "")) : null,
         p.reviewed ? el("span", { class: "badge ok" }, "검수 완료")
           : st && st.healthy ? el("span", { class: "badge ok", title: "많은 사람이 풀었고 정답률이 정상이에요" }, st.n + "명 풀이 · 이상 없음")
@@ -547,10 +557,81 @@
         p.explain || "") : null,
       reveal && st ? el("div", { class: "stat" }, "푼 사람 " + st.n + "명 · 정답률 " + Math.round(st.rate * 100) + "%"
         + (st.wj >= 0 && st.wshare >= 0.25 ? " · 많이 고른 오답 " + (st.wj + 1) + "번 (" + Math.round(st.wshare * 100) + "%)" : "")) : null,
+      reveal && st && st.confirmed ? el("div", { class: "okline" }, "헷갈리기 쉬운 문제예요. 많은 사람이 " + (st.wj + 1) + "번을 골랐지만, AI가 다시 풀어서 정답(" + (p.answer + 1) + "번)이 맞는 걸 확인했어요.") : null,
       reveal && st && st.suspect ? el("div", { class: "warnline" }, "주의: 많은 사람이 " + (st.wj + 1) + "번을 골랐어요. 정답이 틀렸을 수도 있으니 해설을 꼭 확인하고, 이상하면 '오류 신고'를 눌러주세요.") : null,
       foot.length ? el("div", { class: "qfoot" }, foot) : null,
       reportBox
     );
+    if (!reveal && onPick) { art._pick = onPick; art._n = (p.choices || []).length; }   // 키보드 숫자키로 고르기
+    return art;
+  }
+
+  // 같은 주제·비슷한 낱말의 문제 (안 푼 문제 우선)
+  const toks = (t) => (t || "").split(/[\s·,()/\[\]]+/).filter((w) => w.length >= 2);
+  function relatedTo(p, k) {
+    const tk = new Set(toks(p.topic + " " + (p.fromTopic || "")));
+    let list = S.problems.filter((o) => o.id !== p.id).map((o) => {
+      let sc = o.topic === p.topic ? 10 : 0;
+      toks(o.topic + " " + (o.fromTopic || "")).forEach((w) => { if (tk.has(w)) sc += 3; });
+      if (sc && o.subject === p.subject) sc += 1;
+      if (sc && S.answers[o.id] === undefined) sc += 0.5;
+      return { o, sc };
+    }).filter((x) => x.sc >= 3).sort((a, b) => b.sc - a.sc).map((x) => x.o);
+    if (list.length < k) list = list.concat(shuffle(S.problems.filter((o) => o.id !== p.id && o.subject === p.subject && !list.includes(o) && S.answers[o.id] === undefined)));
+    return list.slice(0, k);
+  }
+
+  // 내 시험 D-day: 남은 날로 하루 할 양을 나눠요 (날짜는 이 기기에만 저장)
+  const dateOnly = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  function dayLeft(goal) { return Math.round((dateOnly(goal.date + "T00:00:00") - dateOnly(Date.now())) / DAY); }
+  function dailyPlan() {
+    const goal = store.get("goal", null);
+    if (!goal || !goal.date) return null;
+    const days = dayLeft(goal);
+    const left = Math.max(1, days);
+    const todo = S.problems.filter((p) => S.answers[p.id] === undefined).length;
+    const due = dueList().length;
+    const q = Math.min(80, Math.max(10, Math.ceil(todo / left))) + due;
+    let c = 0, cDone = 0;
+    if (CARDS) {
+      const open = CARDS.filter((x) => !(S.cardRev[x.id] && S.cardRev[x.id].done)).length;
+      c = Math.min(30, Math.max(5, Math.ceil(open / left))) + CARDS.filter(cardDue).length;
+      cDone = (store.get("cardDaily", {}) || {})[today()] || 0;
+    }
+    return { goal, days, q, qDone: S.daily[today()] || 0, c, cDone };
+  }
+  function ddayBox() {
+    const plan = dailyPlan();
+    if (!CARDS) loadCards().then(() => { const b = $("ddaybox"); if (b && CARDS) b.replaceChildren(ddayBox()); });
+    const form = (g) => {
+      const d = el("input", { type: "date", "aria-label": "시험 날짜" });
+      const nm = el("input", { maxlength: "20", placeholder: "시험 이름 (선택, 예: 한전KPS 필기)", "aria-label": "시험 이름" });
+      if (g) { d.value = g.date; nm.value = g.name || ""; }
+      const save = el("button", { type: "button", class: "btn sm" }, "저장");
+      save.addEventListener("click", () => { if (!d.value) return; store.set("goal", { date: d.value, name: nm.value.trim() }); $("ddaybox").replaceChildren(ddayBox()); });
+      const del = g ? el("button", { type: "button", class: "btn-ghost" }, "D-day 지우기") : null;
+      if (del) del.addEventListener("click", () => { store.set("goal", null); $("ddaybox").replaceChildren(ddayBox()); });
+      return el("div", { class: "actions ddform" }, d, nm, save, del);
+    };
+    if (!plan) {
+      return el("details", { class: "weak dday" }, el("summary", {}, "시험 날짜를 넣으면 하루에 풀 양을 계산해 줘요"), form(null));
+    }
+    const { goal, days, q, qDone, c, cDone } = plan;
+    const edit = el("button", { type: "button", class: "linkish" }, "바꾸기");
+    const box = el("div", { class: "dday on" });
+    edit.addEventListener("click", () => box.replaceChildren(form(goal)));
+    if (days < 0) {
+      box.append(el("b", { class: "dnum" }, "끝"), el("span", {}, (goal.name || "시험") + " 수고했어요! 복기 남기기에 기억나는 주제를 남겨주세요. "), edit);
+      return box;
+    }
+    const ok = qDone >= q && (!c || cDone >= c);
+    box.append(
+      el("b", { class: "dnum" }, days === 0 ? "D-DAY" : "D-" + days),
+      el("span", { class: "dname" }, goal.name || ""),
+      days === 0 ? el("span", {}, "오늘 시험이에요. 끝나면 바로 폰 메모에 번호와 키워드를 적어두세요!")
+        : el("span", {}, "오늘 목표 · 문제 ", el("b", {}, qDone + "/" + q), c ? [" · 공식 카드 ", el("b", {}, cDone + "/" + c)] : null, ok ? el("span", { class: "okmark" }, " ✓ 달성") : null),
+      edit);
+    return box;
   }
 
   function updateStarCount() {
@@ -570,9 +651,23 @@
     if (ro) ro.textContent = "오늘 복습할 문제 (" + due + ")";
     updateStarCount();
     const wp = $("weakbox"); if (wp) wp.replaceChildren(...[weakPanel()].filter(Boolean));
+    const db = $("ddaybox"); if (db && S.loaded && !db.querySelector(".ddform")) db.replaceChildren(ddayBox());
     if (!S.loaded) return;
     const list = visibleProblems();
     const view = $("f-view").value;
+    if (S.related) {
+      const base = S.problems.find((x) => x.id === S.related);
+      if (base) {
+        if (!S.relatedList || S.relatedList.base !== base.id) S.relatedList = { base: base.id, ids: relatedTo(base, 3).map((x) => x.id) };
+        const back = el("button", { type: "button", class: "btn-line sm" }, "원래 목록으로");
+        back.addEventListener("click", () => { S.related = ""; S.relatedList = null; renderProblems(); });
+        const rel = S.relatedList.ids.map((id) => S.problems.find((x) => x.id === id)).filter(Boolean);
+        $("qlist").replaceChildren(el("div", { class: "rule" }, "'" + base.topic + "'과(와) 비슷한 문제예요. 틀린 문제를 다시 보고 이어서 풀어보세요. ", back),
+          ...[base].concat(rel).map((p) => card(p, p.id, "solve", S.answers[p.id], (j) => { savePick(p.id, j); renderProblems(); })));
+        return;
+      }
+      S.related = "";
+    }
     if (S.focus) {
       const all = el("button", { type: "button", class: "btn-line sm" }, "전체 문제 보기");
       all.addEventListener("click", () => { S.focus = ""; history.replaceState(null, "", location.pathname); renderProblems(); });
@@ -611,7 +706,7 @@
   let searchT = 0;
   if ($("f-q")) $("f-q").addEventListener("input", () => { clearTimeout(searchT); searchT = setTimeout(() => { S.limit = 20; renderProblems(); }, 200); });
   ["f-sub", "f-co", "f-view"].forEach((id) => $(id).addEventListener("change", () => {
-    store.set({ "f-sub": "sub", "f-co": "co", "f-view": "view" }[id], $(id).value); S.limit = 20; S.reviewPicks = {}; renderProblems();
+    store.set({ "f-sub": "sub", "f-co": "co", "f-view": "view" }[id], $(id).value); S.limit = 20; S.reviewPicks = {}; S.related = ""; renderProblems();
   }));
   armButton($("reset"), "풀이 기록 지우기", "한 번 더 누르면 지워져요", () => {
     S.answers = {}; store.set("answers", S.answers);
@@ -1287,28 +1382,121 @@
   }
 
   /* ================= ranking ================= */
+  // 내 기록: 모의고사 점수 변화, 공부한 날, 과목별 진도, 외운 카드
+  async function myRecord() {
+    let hist = (store.get("mockHist", []) || []).map((h) => ({ k: h.k, s: h.s, t: h.t, secs: h.secs, at: h.at }));
+    if (sb && S.user) {
+      const { data } = await sb.from("mock_results").select("exam_key,score,total,secs,created_at").order("created_at", { ascending: true }).limit(60);
+      if (data && data.length >= hist.length) hist = data.map((r) => ({ k: r.exam_key, s: r.score, t: r.total, secs: r.secs, at: Date.parse(r.created_at) }));
+    }
+    const done = S.problems.filter((p) => S.answers[p.id] !== undefined);
+    const right = done.filter((p) => S.answers[p.id] === p.answer).length;
+    await loadCards();
+    const cardsDone = (CARDS || []).filter((c) => S.cardRev[c.id] && S.cardRev[c.id].done).length;
+    const tiles = el("div", { class: "tiles" },
+      [["푼 문제", done.length + " / " + S.problems.length], ["정답률", done.length ? Math.round(right / done.length * 100) + "%" : "-"],
+       ["연속 공부", streak() + "일"], ["외운 공식 카드", cardsDone + " / " + (CARDS || []).length]]
+        .map(([k, v]) => el("div", { class: "tile" }, el("span", {}, k), el("b", {}, v))));
+    const out = [el("h2", {}, "내 기록"), tiles];
+
+    // 모의고사 점수 변화 (최근 20회)
+    const recent = hist.slice(-20);
+    out.push(el("h3", { class: "rhead" }, "모의고사 점수 변화"));
+    if (recent.length >= 2) out.push(scoreChart(recent));
+    else out.push(el("p", { class: "muted" }, recent.length ? "모의고사를 한 번 더 보면 점수 변화 그래프가 나와요." : "모의고사를 보면 여기에 점수 변화가 쌓여요."));
+    if (recent.length) out.push(el("div", { class: "tablewrap" }, el("table", { class: "rank" },
+      el("thead", {}, el("tr", {}, el("th", {}, "날짜"), el("th", {}, "모의고사"), el("th", { class: "num" }, "점수"), el("th", { class: "num" }, "시간"))),
+      el("tbody", {}, recent.slice(-8).reverse().map((h) => el("tr", {},
+        el("td", {}, new Date(h.at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })), el("td", {}, h.k),
+        el("td", { class: "num" }, h.s + "/" + h.t + " (" + Math.round(h.s / h.t * 100) + "%)"), el("td", { class: "num" }, fmt(h.secs * 1000))))))));
+
+    // 공부한 날 (최근 12주)
+    out.push(el("h3", { class: "rhead" }, "공부한 날 (최근 12주, 하루에 푼 문제 수)"), studyGrid());
+
+    // 과목별 진도
+    const by = new Map();
+    S.problems.forEach((p) => { const v = by.get(p.subject) || [0, 0, 0]; v[0]++; const a = S.answers[p.id]; if (a !== undefined) { v[1]++; if (a === p.answer) v[2]++; } by.set(p.subject, v); });
+    out.push(el("h3", { class: "rhead" }, "과목별 진도"), el("div", { class: "bars prog" }, [...by].sort((x, y) => subjRank(x[0]) - subjRank(y[0])).map(([k, [n, d, r]]) => {
+      const fill = el("span", { class: "fill" }); fill.style.width = (d / n * 100) + "%";
+      return el("div", { class: "bar" }, el("span", { class: "lab" }, k), el("span", { class: "track" }, fill), el("span", { class: "n" }, d + "/" + n + (d ? " · " + Math.round(r / d * 100) + "%" : "")));
+    })), el("p", { class: "muted" }, "막대는 푼 비율, 오른쪽은 푼 문제/전체 · 정답률. 기록은 이 기기에 저장되고, 로그인하면 풀이 기록과 모의고사 점수가 폰·PC에서 이어져요."));
+    return out;
+  }
+
+  function scoreChart(rows) {
+    const W = Math.max(280, Math.min(720, ($("rank").clientWidth || 600))), H = 190, L = 34, R = 12, T = 12, B = 26;
+    const NS = "http://www.w3.org/2000/svg";
+    const sv = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); return e; };
+    const svg = sv("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, role: "img", "aria-label": "모의고사 점수 변화 그래프 (아래 표와 같은 내용)" });
+    const x = (i) => L + (rows.length === 1 ? 0 : i * (W - L - R) / (rows.length - 1));
+    const y = (v) => T + (1 - v) * (H - T - B);
+    [0, 0.5, 1].forEach((v) => {
+      svg.append(sv("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "grid" }));
+      const t = sv("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end", class: "axis" }); t.textContent = Math.round(v * 100) + "%"; svg.append(t);
+    });
+    const pts = rows.map((h, i) => [x(i), y(h.s / h.t)]);
+    svg.append(sv("polyline", { points: pts.map((p) => p.join(",")).join(" "), class: "line" }));
+    const day = (h) => new Date(h.at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+    [[0, "start"], [rows.length - 1, "end"]].forEach(([i, anc]) => { const t = sv("text", { x: x(i), y: H - 6, "text-anchor": anc, class: "axis" }); t.textContent = day(rows[i]); svg.append(t); });
+    const tip = el("div", { class: "charttip", hidden: "" });
+    const wrap = el("div", { class: "chartwrap" }, svg, tip);
+    rows.forEach((h, i) => {
+      svg.append(sv("circle", { cx: pts[i][0], cy: pts[i][1], r: 4, class: "dot" }));
+      const hit = sv("circle", { cx: pts[i][0], cy: pts[i][1], r: 14, class: "hit", tabindex: "0" });
+      const show = () => {
+        tip.textContent = day(h) + " · " + h.k + " · " + h.s + "/" + h.t + " (" + Math.round(h.s / h.t * 100) + "%)";
+        tip.hidden = false;
+        tip.style.left = Math.min(Math.max(pts[i][0], 70), W - 70) + "px"; tip.style.top = (pts[i][1] - 10) + "px";
+      };
+      hit.addEventListener("mouseenter", show); hit.addEventListener("focus", show);
+      hit.addEventListener("mouseleave", () => { tip.hidden = true; }); hit.addEventListener("blur", () => { tip.hidden = true; });
+      svg.append(hit);
+    });
+    return wrap;
+  }
+
+  function studyGrid() {
+    const end = dateOnly(Date.now());
+    const start = new Date(end); start.setDate(start.getDate() - 83 - start.getDay());   // 12주 전 일요일부터
+    const key = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const cells = [];
+    let total = 0, days = 0;
+    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const n = S.daily[key(d)] || 0;
+      if (n) { total += n; days++; }
+      const lv = n === 0 ? 0 : n < 10 ? 1 : n < 30 ? 2 : n < 60 ? 3 : 4;
+      cells.push(el("span", { class: "cell l" + lv, title: (d.getMonth() + 1) + "/" + d.getDate() + " · " + n + "문제" }));
+    }
+    return el("div", { class: "studywrap" },
+      el("div", { class: "studygrid", role: "img", "aria-label": "최근 12주 동안 " + days + "일 공부, " + total + "문제" }, cells),
+      el("div", { class: "muted" }, "최근 12주 동안 " + days + "일 · " + total + "문제 · 진할수록 많이 푼 날 (1~9 / 10~29 / 30~59 / 60문제 이상)"));
+  }
+
   async function renderRank() {
     const box = $("rank");
+    const rec = await myRecord();
     const how = el("p", { class: "muted" }, "공개된 복기 1점 + 그 복기로 문제가 만들어지면 2점 추가. 자동 검사와 문제 반영은 매일 오전 9시예요.");
-    if (!sb) { box.replaceChildren(el("div", { class: "empty" }, "지금은 랭킹을 불러올 수 없어요.")); return; }
-    const { data, error } = await sb.rpc("get_ranking", { lim: 50 });
-    if (error) { box.replaceChildren(el("div", { class: "empty" }, "랭킹을 불러오지 못했어요. 잠시 후 다시 열어주세요.")); return; }
-    if (!data.length) {
-      const b = el("button", { type: "button", class: "btn" }, "첫 복기 남기러 가기");
-      b.addEventListener("click", () => showTab("recall"));
-      box.replaceChildren(el("div", { class: "panel" }, el("h2", {}, "아직 랭킹이 비어 있어요"), el("p", {}, "지금 복기를 남기면 바로 1등이에요."), how, el("div", { class: "actions" }, b)));
-      return;
+    let part;
+    if (!sb) part = [el("div", { class: "empty" }, "지금은 랭킹을 불러올 수 없어요.")];
+    else {
+      const { data, error } = await sb.rpc("get_ranking", { lim: 50 });
+      if (error) part = [el("div", { class: "empty" }, "랭킹을 불러오지 못했어요. 잠시 후 다시 열어주세요.")];
+      else if (!data.length) {
+        const b = el("button", { type: "button", class: "btn" }, "첫 복기 남기러 가기");
+        b.addEventListener("click", () => showTab("recall"));
+        part = [el("div", { class: "panel" }, el("h2", {}, "아직 복기 랭킹이 비어 있어요"), el("p", {}, "지금 복기를 남기면 바로 1등이에요."), how, el("div", { class: "actions" }, b))];
+      } else {
+        const medal = ["1", "2", "3"];
+        part = [el("h2", {}, "복기 랭킹"), how,
+          el("div", { class: "tablewrap" }, el("table", { class: "rank" },
+            el("thead", {}, el("tr", {}, el("th", {}, "순위"), el("th", {}, "이름"), el("th", { class: "num" }, "복기"), el("th", { class: "num" }, "문제화"), el("th", { class: "num" }, "점수"))),
+            el("tbody", {}, data.map((r, i) => el("tr", { class: r.name === myName() ? "me" : "" },
+              el("td", {}, el("span", { class: "medal" }, i < 3 ? medal[i] + "위" : String(i + 1))),
+              el("td", {}, r.name + (r.name === myName() ? " · 나" : "")),
+              el("td", { class: "num" }, String(r.recalls)), el("td", { class: "num" }, String(r.used)), el("td", { class: "num" }, String(r.points)))))))];
+      }
     }
-    const medal = ["1", "2", "3"];
-    box.replaceChildren(
-      el("h2", {}, "복기 랭킹"), how,
-      el("div", { class: "tablewrap" }, el("table", { class: "rank" },
-        el("thead", {}, el("tr", {}, el("th", {}, "순위"), el("th", {}, "이름"), el("th", { class: "num" }, "복기"), el("th", { class: "num" }, "문제화"), el("th", { class: "num" }, "점수"))),
-        el("tbody", {}, data.map((r, i) => el("tr", { class: r.name === myName() ? "me" : "" },
-          el("td", {}, el("span", { class: "medal" }, i < 3 ? medal[i] + "위" : String(i + 1))),
-          el("td", {}, r.name + (r.name === myName() ? " · 나" : "")),
-          el("td", { class: "num" }, String(r.recalls)), el("td", { class: "num" }, String(r.used)), el("td", { class: "num" }, String(r.points)))))))
-    );
+    put(box, ...rec, ...part);
   }
 
   /* ================= mock exams ================= */
@@ -1425,20 +1613,37 @@
       weakCard ? el("div", { class: "mockgrid" }, weakCard) : null,
       el("div", { class: "panel" }, el("h2", {}, "회사별 실전 모의고사"),
         el("p", {}, "실제 시험처럼 끝까지 풀고 한 번에 채점해요. 시간을 재고, 과목별 점수와 틀린 문제 해설을 보여줘요."),
+        (() => {
+          const sel = el("select", { id: "m-limit" }, [["0", "시간 제한 없음 (걸린 시간만 재기)"], ["60", "문항당 1분 (50문항 50분)"], ["45", "문항당 45초 (실전보다 빡빡하게)"]].map(([v, t]) => el("option", { value: v }, t)));
+          sel.value = String(store.get("mockLimit", 0));
+          sel.addEventListener("change", () => store.set("mockLimit", Number(sel.value)));
+          return el("div", { class: "field limitfield" }, el("label", { for: "m-limit" }, "시간 제한 (모든 모의고사에 적용, 시간이 끝나면 자동 제출)"), sel);
+        })(),
         el("p", { class: "muted" }, ex.basis || "")),
       el("div", { class: "mockgrid" }, cards));
   }
 
   async function startMock(exam) {
     const sections = await buildExam(exam);
-    S.mock = { exam, sections, picks: {}, times: {}, start: Date.now(), last: Date.now(), done: false };
+    const per = Number(store.get("mockLimit", 0)) || 0;
+    const count = sections.reduce((a, x) => a + x.items.length, 0);
+    S.mock = { exam, sections, picks: {}, times: {}, start: Date.now(), last: Date.now(), done: false, limit: per ? count * per * 1000 : 0 };
     clearInterval(S.timer);
     S.timer = setInterval(updateTimer, 1000);
     renderMock();
     window.scrollTo({ top: 0 });
   }
   const fmt = (ms) => { const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
-  function updateTimer() { const t = document.getElementById("mock-timer"); if (t && S.mock && !S.mock.done) t.textContent = fmt(Date.now() - S.mock.start); }
+  function timerText(m) {
+    if (!m.limit) return fmt(Date.now() - m.start);
+    return "남은 " + fmt(Math.max(0, m.limit - (Date.now() - m.start)));
+  }
+  function updateTimer() {
+    const m = S.mock, t = document.getElementById("mock-timer");
+    if (!m || m.done) return;
+    if (m.limit && Date.now() - m.start >= m.limit) { m.timeout = true; finishMock(); return; }   // 시간 끝 → 자동 제출
+    if (t) { t.textContent = timerText(m); t.classList.toggle("low", !!m.limit && m.limit - (Date.now() - m.start) < 60000); }
+  }
   const mockItems = () => S.mock.sections.flatMap((s) => s.items);
 
   function renderMock() {
@@ -1465,7 +1670,8 @@
     box.replaceChildren(
       el("div", { class: "examhead" },
         el("strong", {}, m.exam.company + " 모의고사"),
-        el("span", { class: "timer", id: "mock-timer" }, fmt(Date.now() - m.start)),
+        el("span", { class: "timer" + (m.limit ? " limit" : ""), id: "mock-timer", title: m.limit ? "제한 시간 " + Math.round(m.limit / 60000) + "분" : "걸린 시간" }, timerText(m)),
+        el("span", { class: "kbdhint" }, "숫자키 1~4 고르기 · N 다음"),
         el("span", { class: "prog" }, answered + " / " + items.length + " 표기"),
         el("span", { class: "actions" }, quit, submit)),
       el("div", { class: "list" }, body),
@@ -1484,6 +1690,9 @@
     const best = store.get("mockBest", {});
     const prev = best[m.exam.company];
     if (!prev || right / items.length > prev.score / prev.total) { best[m.exam.company] = { score: right, total: items.length }; store.set("mockBest", best); }
+    const hist = store.get("mockHist", []) || [];
+    hist.push({ k: m.exam.company, s: right, t: items.length, secs: Math.round(elapsed / 1000), at: Date.now() });
+    store.set("mockHist", hist.slice(-60));
     const bySub = new Map();
     items.forEach((p) => { const v = bySub.get(p.subject) || [0, 0]; v[1]++; if (m.picks[p.id] === p.answer) v[0]++; bySub.set(p.subject, v); });
     const back = el("button", { type: "button", class: "btn-line" }, "모의고사 목록");
@@ -1533,7 +1742,9 @@
       el("div", { class: "result" },
         el("h2", {}, m.exam.company + " 모의고사 결과"),
         el("div", { class: "big" }, right + " / " + items.length),
-        el("p", {}, "정답률 " + Math.round(right / Math.max(1, items.length) * 100) + "% · 걸린 시간 " + fmt(elapsed)),
+        el("p", {}, "정답률 " + Math.round(right / Math.max(1, items.length) * 100) + "% · 걸린 시간 " + fmt(Math.min(elapsed, m.limit || elapsed))
+          + (m.limit ? " / 제한 " + Math.round(m.limit / 60000) + "분" : "")),
+        m.timeout ? el("p", { class: "warnline" }, "시간이 다 돼서 자동으로 제출했어요. 안 푼 문제는 오답으로 채점했어요.") : null,
         rankBox,
         el("div", { class: "bars" }, [...bySub].sort((a, b) => subjRank(a[0]) - subjRank(b[0])).map(([s, [r, t]]) => {
           const fill = el("span", { class: "fill" }); fill.style.width = (r / t * 100) + "%";
@@ -1593,6 +1804,9 @@
     if (!ok) S.cardRev[c.id] = { step: 0, due: now + DAY };
     else { const step = r && !r.done ? r.step + 1 : 1; S.cardRev[c.id] = step >= GAPS.length ? { done: true, step } : { step, due: now + GAPS[step] * DAY }; }
     store.set("cardRev", S.cardRev);
+    const cd = store.get("cardDaily", {}) || {}; const t = today(); cd[t] = (cd[t] || 0) + 1;
+    Object.keys(cd).sort().slice(0, -60).forEach((k) => delete cd[k]);
+    store.set("cardDaily", cd);
   }
   async function renderCards() {
     const box = $("cards");
@@ -1616,7 +1830,8 @@
     mSel.addEventListener("change", () => { cardMode = mSel.value; store.set("cardMode", cardMode); reset(); });
     const doneN = all.filter((c) => S.cardRev[c.id] && S.cardRev[c.id].done).length;
     const head = [el("div", { class: "toolbar" }, sSel, mSel),
-      el("div", { class: "scoreline" }, "외운 카드 " + doneN + " / " + all.length + " · '알았어요' 세 번이면 졸업, 헷갈린 카드는 내일 다시")];
+      el("div", { class: "scoreline" }, "외운 카드 " + doneN + " / " + all.length + " · '알았어요' 세 번이면 졸업, 헷갈린 카드는 내일 다시"
+        + (() => { const pl = dailyPlan(); return pl && pl.c && pl.days >= 0 ? " · 오늘 목표 " + pl.cDone + "/" + pl.c + "장" : ""; })())];
     if (cardMode === "list") {
       put(box, ...head, el("div", { class: "list" }, all.filter(inSub).map((c) => el("article", { class: "fcard flat" },
         el("div", { class: "meta" }, c.subject), el("h3", {}, c.front), el("div", { class: "fback" }, c.back), c.tip ? el("p", { class: "ftip" }, c.tip) : null))));
@@ -1650,6 +1865,30 @@
     put(box, ...head, face, cardFlip ? el("div", { class: "actions cardbtns" }, no, yes) : null);
     if (cardFlip) yes.focus({ preventScroll: true }); else face.focus({ preventScroll: true });
   }
+
+  // PC 키보드: 숫자키로 화면에 보이는 문제의 답 고르기, N(또는 Enter)으로 다음 문제로
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    const tg = e.target;
+    if (tg && (/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName) || tg.isContentEditable)) return;
+    const panel = document.querySelector('section[role="tabpanel"]:not([hidden])');
+    if (!panel || (panel.id !== "p-solve" && panel.id !== "p-mock")) return;
+    const top = 120;
+    const all = [...panel.querySelectorAll("article.q")];
+    const inView = (a) => { const r = a.getBoundingClientRect(); return r.bottom > top && r.top < innerHeight - 40; };
+    if (/^[1-5]$/.test(e.key)) {
+      const cur = all.find((a) => a._pick && inView(a));
+      if (!cur || Number(e.key) > cur._n) return;
+      e.preventDefault();
+      cur._pick(Number(e.key) - 1);
+      return;
+    }
+    const isNext = e.key === "n" || e.key === "N" || e.key === "ㅜ" || (e.key === "Enter" && (tg === document.body || !tg || tg === document.documentElement));
+    if (!isNext) return;
+    const curIdx = all.findIndex(inView);
+    const nx = all.slice(curIdx + 1).find((a) => (panel.id === "p-mock" ? a.dataset.answered !== "1" : !!a._pick)) || all[curIdx + 1];
+    if (nx) { e.preventDefault(); nx.scrollIntoView({ block: "start", behavior: "smooth" }); }
+  });
 
   /* ================= start ================= */
   renderAccount();
