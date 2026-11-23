@@ -171,11 +171,12 @@
         const todo = (S.adminCounts || {});
         const n = (todo.waiting_members || 0) + (todo.pending_recalls || 0) + (todo.open_reports || 0);
         if (n) {
-          const go = el("button", { type: "button", class: "linkish", title: "확인 대기 " + (todo.waiting_members || 0) + "명 · 복기 검토 " + (todo.pending_recalls || 0) + "건 · 오류 신고 " + (todo.open_reports || 0) + "건" }, "할 일", el("span", { class: "count" }, String(n)));
+          const go = el("button", { type: "button", class: "linkish", title: "복기 검토 " + (todo.pending_recalls || 0) + "건 · 오류 신고 " + (todo.open_reports || 0) + "건" }, "할 일", el("span", { class: "count" }, String(n)));
           go.addEventListener("click", () => showTab("recall"));
           extra.push(" · ", go);
         }
-      } else if (S.realName && !S.verified) extra.push(" · 실명 확인 대기");
+      } else if (S.banned) extra.push(" · ", el("span", { class: "pill rejected" }, "복기 정지"));
+      else if (S.strikes) extra.push(" · ", el("span", { class: "pill warn" }, "경고 " + S.strikes + "회"));
       box.replaceChildren(el("span", {}, me, ...extra), out);
     } else {
       const b = el("button", { type: "button", class: "btn-line sm" }, "로그인 / 회원가입");
@@ -194,7 +195,7 @@
     authMode = mode;
     $("mode-login").setAttribute("aria-pressed", String(mode === "login"));
     $("mode-signup").setAttribute("aria-pressed", String(mode === "signup"));
-    ["f-nick", "f-pw2", "f-real", "f-invite", "a-real-note", "a-privacy", "f-agree"].forEach((id) => { $(id).hidden = mode !== "signup"; });
+    ["f-nick", "f-pw2", "f-real", "a-real-note", "a-privacy", "f-agree"].forEach((id) => { $(id).hidden = mode !== "signup"; });
     $("a-submit").textContent = mode === "signup" ? "가입하기" : "로그인";
     $("a-pw").setAttribute("autocomplete", mode === "signup" ? "new-password" : "current-password");
     setMsg("");
@@ -217,7 +218,7 @@
         const { error } = await sb.auth.signInWithPassword({ email: toEmail(id), password: pw });
         if (error) return setMsg("아이디나 비밀번호가 맞지 않아요.", true);
       } else {
-        const nick = $("a-nick").value.trim(), real = $("a-real").value.trim(), invite = $("a-invite").value.trim().toUpperCase();
+        const nick = $("a-nick").value.trim(), real = $("a-real").value.trim();
         if (pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return setMsg("비밀번호는 영문과 숫자를 섞어 8자 이상으로 만들어주세요.", true);
         if (pw.toLowerCase().includes(id)) return setMsg("비밀번호에 아이디를 넣지 마세요.", true);
         if (pw !== $("a-pw2").value) return setMsg("비밀번호 확인이 달라요.", true);
@@ -226,18 +227,12 @@
         if (!/^[가-힣A-Za-z0-9_ ]{1,12}$/.test(nick)) return setMsg("닉네임은 한글·영문·숫자로 1~12자예요.", true);
         if (BAD_WORDS.test(nick) || /(미친|운영자|관리자|admin)/i.test(nick)) return setMsg("쓸 수 없는 닉네임이에요.", true);
         setMsg("확인하는 중…");
-        if (invite) {
-          const inv = await sb.rpc("check_invite", { code: invite, rname: real });
-          if (inv.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
-          if (inv.data === "mismatch") return setMsg("이 개인 코드는 다른 실명으로 만들어졌어요. 실명을 정확히 적어주세요.", true);
-          if (inv.data !== "personal") return setMsg("개인 코드가 맞지 않아요. 코드가 없으면 칸을 비워두고 가입하세요.", true);
-        }
         const ok = await sb.rpc("username_available", { u: id });
         if (ok.error) return setMsg("확인하지 못했어요. 잠시 후 다시 시도해 주세요.", true);
         if (!ok.data) return setMsg("이미 쓰고 있는 아이디예요.", true);
         const dup = await sb.from("profiles").select("id").eq("nickname", nick).limit(1);
         if (dup.data && dup.data.length) return setMsg("이미 쓰고 있는 닉네임이에요.", true);
-        const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw, options: { data: { username: id, nickname: nick, real_name: real, invite, agree: "yes" } } });
+        const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw, options: { data: { username: id, nickname: nick, real_name: real, agree: "yes" } } });
         if (error) {
           const m = String(error.message || "");
           if (/registered|exists/i.test(m)) return setMsg("이미 쓰고 있는 아이디예요.", true);
@@ -255,11 +250,11 @@
   async function onSession(session) {
     const prev = S.user && S.user.id;
     S.user = session ? session.user : null;
-    S.nickname = ""; S.realName = ""; S.isAdmin = false; S.verified = false;
+    S.nickname = ""; S.realName = ""; S.isAdmin = false; S.verified = false; S.strikes = 0; S.banned = false;
     if (S.user) {
       const { data } = await sb.rpc("my_profile");
       const me = data && data[0];
-      if (me) { S.nickname = me.nickname; S.realName = me.real_name || ""; S.isAdmin = !!me.is_admin; S.verified = !!me.verified; }
+      if (me) { S.nickname = me.nickname; S.realName = me.real_name || ""; S.isAdmin = !!me.is_admin; S.verified = !!me.verified; S.strikes = me.strikes || 0; S.banned = !!me.banned; }
     }
     $("realbox").hidden = !(S.user && !S.realName);
     if (!S.user) $("acctbox").hidden = true;
@@ -869,13 +864,15 @@
   async function renderRecall() {
     const box = $("recallbox");
     if (!sb) { box.replaceChildren(el("div", { class: "empty" }, "지금은 복기를 받을 수 없어요. 잠시 후 다시 열어주세요.")); return; }
-    const guest = !S.user, needReal = !!S.user && !S.realName, unverified = !!S.user && !!S.realName && !S.verified && !S.isAdmin;
+    const guest = !S.user, needReal = !!S.user && !S.realName, unverified = !!S.user && !!S.realName && !S.verified && !S.isAdmin && !S.banned;
     const rules = el("details", { class: "fold" }, el("summary", {}, "올리기 전에 알아둘 것 (검사 · 공개 · 점수)"),
       el("ul", { class: "rules" },
         el("li", {}, el("b", {}, "문제 원문은 그대로 옮기지 마세요."), " 어떤 주제가 어떤 식으로 나왔는지만 적어주세요. 시험 문제는 출제기관 저작물이고, 유출 금지 서약을 받는 시험도 있어요."),
         el("li", {}, "올린 복기는 검사(운영자 확인 또는 매일 오전 9시 자동 검사)를 통과하면 닉네임(김*희)과 함께 공개돼요. 그 전에는 나만 보여요."),
-        el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 하루 25건까지예요 (실명 확인 전에는 10건)."),
-        el("li", {}, "점수: 공개된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가. 랭킹에는 운영자가 실명을 확인한 회원만 올라가요 (확인 전 점수도 그대로 쌓여 있어요).")));
+        el("li", {}, "욕설, 링크, 같은 글자 반복, 자음만 쓴 글, 이미 올린 주제는 올라가지 않아요. 처음엔 하루 10건, 복기가 한 번 통과하면 25건까지예요."),
+        el("li", {}, el("b", {}, "제대로 쓰면 자동 인정: "), "올린 복기가 한 번 검사를 통과하면 자동으로 실명 확인돼서 랭킹에 올라가요."),
+        el("li", {}, el("b", {}, "이상하게 쓰면 경고 → 정지: "), "장난·홍보·관계없는 글로 반려되면 경고 1회, 두 번이면 복기 올리기가 정지돼요. 심한 장난은 운영자가 바로 정지할 수 있어요. 문제 풀기·모의고사는 계속 쓸 수 있어요."),
+        el("li", {}, "점수: 공개된 복기 1점, 그 복기로 문제가 만들어지면 2점 추가")));
     const howTo = el("details", { class: "fold" }, el("summary", {}, "처음이면: 시험 보고 나와서 이렇게 하면 돼요"), postExamSteps());
     const draft = store.get("recallDraft", null) || {};
     const last = store.get("lastRecall", {});
@@ -1077,10 +1074,12 @@
     const lab = (t, input) => el("div", { class: "field" }, el("label", { for: input.id }, t), input);
     const who = guest ? el("div", { class: "rule" }, "로그인 전에도 적어둘 수 있어요. 쓰던 내용은 이 기기에 저장되고, 올릴 때 로그인(처음이면 1분 가입)하면 그대로 올라가요.")
       : needReal ? el("div", { class: "rule" }, "화면 위쪽에서 실명을 등록하면 바로 올릴 수 있어요. 적어둔 내용은 이 기기에 저장돼요.")
-      : unverified ? el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 실명 확인 전이어도 바로 올릴 수 있고, 검사를 통과하면 공개돼요. 랭킹은 운영자가 실명을 확인하면 반영돼요.")
+      : unverified ? el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 올린 복기가 한 번 검사를 통과하면 자동으로 실명 확인돼서 랭킹에 올라가요.")
       : el("div", { class: "rule" }, el("b", {}, myName()), " 이름으로 올라가요. 문제 원문 말고 번호와 키워드만 적어주세요.");
+    const warn = S.strikes && !S.banned ? el("div", { class: "rule warnbox" }, el("b", {}, "경고 " + S.strikes + "회: "),
+      "반려된 복기가 있어요 (아래 '내가 올린 복기'에서 이유 확인). 한 번 더 반려되면 복기 올리기가 정지돼요. 시험에 나온 주제만 적어주세요.") : null;
     const form = el("form", { class: "panel", novalidate: "" },
-      who,
+      who, warn,
       el("div", { class: "grid2" }, lab("기업", sh.co),
         el("div", { class: "field" }, el("label", { for: "r-sess" }, "시험 회차"), sh.sess),
         el("div", { class: "full" }, sessHint, newBox, sessGrid)),
@@ -1148,20 +1147,21 @@
     const mine = el("div", { class: "list" }, el("div", { class: "empty" }, "내 복기를 불러오는 중이에요…"));
     const admin = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "검토할 복기를 불러오는 중이에요…")) : null;
     const members = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "회원 목록을 불러오는 중이에요…")) : null;
-    const codes = S.isAdmin ? el("div", { class: "list" }) : null;
     const reports = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "신고를 불러오는 중이에요…")) : null;
     const sessAdmin = S.isAdmin ? el("div", { class: "list" }, el("div", { class: "empty" }, "시험 회차를 불러오는 중이에요…")) : null;
     const reloadSessAdmin = () => { if (sessAdmin) loadSessAdmin(sessAdmin, () => { loadAdmin(admin); refreshAdminCounts(); }); };
     box.replaceChildren(
-      ...(S.isAdmin ? [el("h2", {}, "운영자 · 회원 실명 확인"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin, el("h2", {}, "운영자 · 시험 회차"), sessAdmin,
-                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 정답 확인 필요 (자동 감지)"), suspectList(), el("h2", {}, "운영자 · 숨긴 문제"), hiddenList(), el("h2", {}, "운영자 · 개인 가입 코드"), codes] : []),
+      ...(S.isAdmin ? [el("h2", {}, "운영자 · 회원 관리 (경고·정지)"), members, el("h2", {}, "운영자 · 공개 전 복기 검토"), admin, el("h2", {}, "운영자 · 시험 회차"), sessAdmin,
+                       el("h2", {}, "운영자 · 문제 오류 신고"), reports, el("h2", {}, "운영자 · 정답 확인 필요 (자동 감지)"), suspectList(), el("h2", {}, "운영자 · 숨긴 문제"), hiddenList()] : []),
       el("div", { class: "panel" }, el("h2", {}, "복기 남기기"),
         el("p", { class: "muted" }, "폰 메모를 붙여넣고 '복기 올리기'만 누르면 끝이에요. 회차·과목·유형·번호는 알아서 채워요."), howTo, rules),
-      form, ...(S.user ? [el("h2", {}, "내가 올린 복기"), mine] : []));
+      S.banned ? el("div", { class: "panel" }, el("h2", {}, "복기 올리기가 정지된 계정이에요"),
+        el("p", {}, "반려된 복기가 두 번 쌓였거나 운영자가 막았어요. 문제 풀기, 모의고사, 공식 암기는 그대로 쓸 수 있어요."),
+        el("p", { class: "muted" }, "잘못 막힌 거라면 운영자에게 아이디를 알려주세요. 운영자가 풀어줄 수 있어요.")) : form,
+      ...(S.user ? [el("h2", {}, "내가 올린 복기"), mine] : []));
     if (S.user) loadMine(mine);
     if (admin) loadAdmin(admin);
     if (members) loadMembers(members);
-    if (codes) loadCodes(codes);
     if (reports) loadReports(reports);
     reloadSessAdmin();
     if (S.isAdmin) refreshAdminCounts();
@@ -1248,62 +1248,21 @@
     return box;
   }
 
-  async function loadCodes(box) {
-    const name = el("input", { id: "c-name", maxlength: "5", placeholder: "후배 실명 (한글)", "aria-label": "실명" });
-    const make = el("button", { type: "submit", class: "btn sm" }, "개인 코드 만들기");
-    const out = el("div", { class: "msg", role: "status" });
-    const form = el("form", { class: "panel", novalidate: "" },
-      el("p", { class: "muted" }, "실명을 넣으면 그 사람만 쓸 수 있는 일회용 코드가 만들어져요. 1:1로 보내주면, 그 코드와 같은 실명으로 가입한 사람은 바로 '실명 확인됨'이 돼요. 코드는 지금 한 번만 보여줘요."),
-      el("div", { class: "actions" }, name, make), out);
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const n = name.value.trim();
-      if (!/^[가-힣]{2,5}$/.test(n)) { out.textContent = "실명은 한글 2~5자로 적어주세요."; out.className = "msg err"; return; }
-      make.disabled = true;
-      const { data, error } = await sb.rpc("admin_create_code", { n });
-      make.disabled = false;
-      if (error) { out.textContent = "코드를 만들지 못했어요."; out.className = "msg err"; return; }
-      const text = n + "님 가입 코드: " + data + "\nhttps://jhnp26.github.io/bokgi/ 회원가입에서 실명 '" + n + "'과 함께 입력하세요. (1회용)";
-      const copy = el("button", { type: "button", class: "btn-line sm" }, "보낼 문구 복사");
-      copy.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(text); copy.textContent = "복사됐어요"; } catch (err) { copy.textContent = "직접 선택해서 복사하세요"; }
-      });
-      out.className = "msg";
-      out.replaceChildren(el("b", {}, n + " → " + data), " ", copy);
-      name.value = "";
-      loadCodeList(list);
-    });
-    const list = el("div", { class: "list" });
-    box.replaceChildren(form, list);
-    loadCodeList(list);
-  }
-
-  async function loadCodeList(box) {
-    const { data, error } = await sb.rpc("admin_codes");
-    if (error || !data.length) { box.replaceChildren(); return; }
-    box.replaceChildren(...data.map((c) => {
-      const kids = [el("div", { class: "meta" }, "만든 날 " + new Date(c.created_at).toLocaleDateString("ko-KR")),
-        el("div", { class: "topic" }, c.real_name + (c.used ? " → 가입함 (" + (c.used_nickname || "탈퇴") + ")" : " · 아직 안 씀"))];
-      if (!c.used) {
-        const d = el("button", { type: "button", class: "btn-ghost" }, "코드 삭제");
-        armButton(d, "코드 삭제", "한 번 더 누르면 삭제돼요", async () => { await sb.rpc("admin_delete_code", { cid: c.id }); loadCodeList(box); });
-        kids.push(d);
-      }
-      return el("article", { class: "rec" }, kids);
-    }));
-  }
-
   let showVerified = false;
   async function loadMembers(box) {
     const { data, error } = await sb.rpc("admin_members");
     if (error) { box.replaceChildren(el("div", { class: "empty" }, "회원 목록을 불러오지 못했어요.")); return; }
-    const waiting = data.filter((m) => !m.verified && !m.is_admin), done = data.filter((m) => m.verified && !m.is_admin);
+    const all = data.filter((m) => !m.is_admin);
+    const watch = all.filter((m) => m.banned || m.strikes > 0), rest = all.filter((m) => !m.banned && !m.strikes);
     const row = (m) => {
+      const state = m.banned ? el("span", { class: "pill rejected" }, "정지")
+        : m.strikes ? el("span", { class: "pill warn" }, "경고 " + m.strikes + "회")
+        : m.verified ? el("span", { class: "pill used" }, "확인됨") : el("span", { class: "pill plain" }, "통과한 복기 없음");
       const kids = [
         el("div", { class: "meta" }, ["아이디 " + m.username, "닉네임 " + m.nickname, "가입 " + new Date(m.created_at).toLocaleDateString("ko-KR"), "복기 " + m.recalls + "건"].join(" · ")),
         el("div", { class: "topic" }, m.real_name || "(실명 미등록)")
       ];
-      const set = (ok) => async () => { const { error: err } = await sb.rpc("admin_verify", { uid: m.id, ok }); if (!err) loadMembers(box); };
+      const ban = (on) => async () => { const { error: err } = await sb.rpc("admin_ban", { uid: m.id, ban: on }); if (!err) { loadMembers(box); loadRecalls(true); } };
       const tmp = el("button", { type: "button", class: "btn-ghost" }, "임시 비밀번호");
       const tmpOut = el("span", { class: "msg", role: "status" });
       armButton(tmp, "임시 비밀번호", "한 번 더 누르면 비밀번호가 바뀌어요", async () => {
@@ -1316,24 +1275,20 @@
         const { error: err } = await sb.rpc("admin_delete_member", { uid: m.id });
         if (!err) { loadRecalls(true); loadMembers(box); }
       });
-      if (!m.verified) {
-        const b = el("button", { type: "button", class: "btn-line sm" }, "실명 확인");
-        if (!m.real_name) b.disabled = true; else b.addEventListener("click", set(true));
-        kids.push(el("div", { class: "actions" }, b, tmp, del), tmpOut);
-      } else {
-        const b = el("button", { type: "button", class: "btn-ghost" }, "확인 취소");
-        armButton(b, "확인 취소", "한 번 더 누르면 취소돼요", set(false));
-        kids.push(el("div", { class: "actions" }, el("span", { class: "pill used" }, "확인됨"), b, tmp, del), tmpOut);
-      }
+      let b;
+      if (m.banned || m.strikes) { b = el("button", { type: "button", class: "btn-line sm" }, m.banned ? "정지 풀기" : "경고 지우기"); b.addEventListener("click", ban(false)); }
+      if (!m.banned) { const x = el("button", { type: "button", class: "btn-ghost" }, "바로 정지"); armButton(x, "바로 정지", "한 번 더 누르면 정지돼요", ban(true)); b = b ? [b, x] : x; }
+      kids.push(el("div", { class: "actions" }, state, b, tmp, del), tmpOut);
       return el("article", { class: "rec" }, kids);
     };
-    const toggle = el("button", { type: "button", class: "btn-ghost" }, showVerified ? "확인된 회원 숨기기" : "확인된 회원 " + done.length + "명 보기");
+    const toggle = el("button", { type: "button", class: "btn-ghost" }, showVerified ? "다른 회원 숨기기" : "다른 회원 " + rest.length + "명 보기");
     toggle.addEventListener("click", () => { showVerified = !showVerified; loadMembers(box); });
     put(box,
-      waiting.length ? el("p", { class: "muted" }, "아는 사람인지 실명을 보고 확인해 주세요. 확인된 회원만 복기를 올릴 수 있어요.") : el("div", { class: "empty" }, "확인을 기다리는 회원이 없어요."),
-      ...waiting.map(row),
-      done.length ? el("div", { class: "toolbar" }, toggle) : null,
-      ...(showVerified ? done.map(row) : []));
+      el("p", { class: "muted" }, "따로 확인할 필요 없어요. 복기가 한 번 통과하면 자동으로 실명 확인, 반려되면 경고, 두 번 반려되면 자동 정지돼요. 장난 계정은 '바로 정지', 잘못 막힌 회원은 '정지 풀기'."),
+      watch.length ? null : el("div", { class: "empty" }, "경고나 정지된 회원이 없어요."),
+      ...watch.map(row),
+      rest.length ? el("div", { class: "toolbar" }, toggle) : null,
+      ...(showVerified ? rest.map(row) : []));
   }
 
   async function loadAdmin(box) {
@@ -1348,12 +1303,14 @@
       const ok = el("button", { type: "button", class: "btn-line sm" }, "승인 (공개)");
       ok.addEventListener("click", act("accepted"));
       const no = el("button", { type: "button", class: "btn-ghost" }, "반려");
-      armButton(no, "반려", "한 번 더 누르면 반려돼요", act("rejected"));
+      armButton(no, "반려", "반려하면 작성자 경고 1회예요. 한 번 더 누르면 반려", act("rejected"));
+      const ban = el("button", { type: "button", class: "btn-ghost" }, "반려 + 바로 정지");
+      armButton(ban, "반려 + 바로 정지", "작성자 복기 올리기가 막혀요. 한 번 더 누르면 정지", act("ban"));
       return el("article", { class: "rec" },
         el("div", { class: "meta" }, [r.real_name ? r.real_name + " (" + r.nickname + ")" : r.nickname, r.company, r.period, r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : ""].filter(Boolean).join(" · ")),
         el("div", { class: "topic" }, r.topic),
         r.note ? el("div", { class: "note" }, r.note) : null,
-        el("div", { class: "actions" }, ok, no));
+        el("div", { class: "actions" }, ok, no, ban));
     }));
   }
 

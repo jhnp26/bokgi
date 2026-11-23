@@ -308,3 +308,5 @@ article.q{scroll-margin-top:110px}
 .fold[open]>summary{margin-bottom:6px}
 .sesshint{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 4px;font-size:13px}
 .sesshint:empty{display:none}
+.pill.plain{background:var(--paper);color:var(--muted)}
+.warnbox{border-left:3px solid var(--warn)}
