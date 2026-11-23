@@ -310,3 +310,12 @@ article.q{scroll-margin-top:110px}
 .sesshint:empty{display:none}
 .pill.plain{background:var(--paper);color:var(--muted)}
 .warnbox{border-left:3px solid var(--warn)}
+.jobs{display:flex;flex-direction:column;gap:6px}
+.job{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0}
+.job>summary{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-weight:400}
+.job>summary .muted{font-size:13px}
+.jbody{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.jrow{display:grid;grid-template-columns:76px 1fr;gap:8px}
+.jrow .k{color:var(--muted);font-size:13px}
+.jbody .note{font-size:13.5px;color:var(--muted);margin:2px 0 0}
+@media (max-width:420px){.jrow{grid-template-columns:1fr;gap:0}}

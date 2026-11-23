@@ -744,6 +744,33 @@
   }
   let trendCompany = "";
 
+  /* ================= 기업별 채용·필기 정보 (data/jobs.json) ================= */
+  let jobsPromise = null;
+  function loadJobs() {
+    if (!jobsPromise) jobsPromise = fetch("data/jobs.json", { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : { jobs: [] })).catch(() => ({ jobs: [] }));
+    return jobsPromise;
+  }
+  function jobCard(j, open) {
+    const exam = (j.dates || []).find(([k]) => k === "필기");
+    const row = (k, v) => (v ? el("div", { class: "jrow" }, el("span", { class: "k" }, k), el("span", {}, v)) : null);
+    const d = el("details", { class: "fold job" },
+      el("summary", {}, el("b", {}, j.company), " · " + j.seats,
+        el("span", { class: "pill " + (j.major ? "used" : "plain") }, j.major ? "전공 있음" : "NCS만"),
+        exam ? el("span", { class: "muted" }, " 필기 " + exam[1]) : null),
+      el("div", { class: "jbody" },
+        row("채용", j.period + " · " + j.post),
+        row("지원 자격", j.need),
+        row("서류", j.doc),
+        row("필기", j.written),
+        row("전공 범위", j.major),
+        row("면접·최종", j.interview),
+        row("일정", (j.dates || []).map(([k, v]) => k + " " + v).join(" → ")),
+        j.tip ? el("p", { class: "note" }, j.tip) : null));
+    if (open) d.open = true;
+    return d;
+  }
+
   /* ================= 시험 회차 (같은 날 같은 시험 복기방) ================= */
   let sessPromise = null, trendBoard = 0;
   function loadSessions(force) {
@@ -790,8 +817,10 @@
     const d = await loadRecalls();
     const all = d.all;
     const sessions = await loadSessions(true);
-    if (!all.length && !sessions.length) { box.replaceChildren(el("div", { class: "empty" }, "아직 올라온 복기가 없어요. 시험 보고 왔다면 '복기 남기기'에서 첫 복기를 남겨주세요.")); return; }
+    const jobsData = await loadJobs(), jobs = jobsData.jobs || [];
+    if (!all.length && !sessions.length && !jobs.length) { box.replaceChildren(el("div", { class: "empty" }, "아직 올라온 복기가 없어요. 시험 보고 왔다면 '복기 남기기'에서 첫 복기를 남겨주세요.")); return; }
     const cos = countBy(all.map((r) => r.company)).map(([k]) => k);
+    jobs.forEach((j) => { if (!cos.includes(j.company)) cos.push(j.company); });
     const sel = el("select", { "aria-label": "기업 선택" }, el("option", { value: "" }, "전체 기업"), cos.map((c) => el("option", { value: c }, c)));
     sel.value = cos.includes(trendCompany) ? trendCompany : "";
     sel.addEventListener("change", () => { trendCompany = sel.value; renderTrend(); });
@@ -799,6 +828,11 @@
     const bySub = countBy(rs.map((r) => r.subject));
     const max = bySub.length ? bySub[0][1] : 1;
     const ivs = d.interviews.filter((q) => !sel.value || q.company === sel.value);
+    const js = jobs.filter((j) => !sel.value || j.company === sel.value);
+    const jobSec = js.length ? [
+      el("h2", {}, sel.value ? "이 기업 채용·필기 구성" : "기업별 채용·필기 구성"),
+      el("p", { class: "muted" }, (jobsData.basis || "") + (sel.value ? "" : " 눌러서 펼쳐 보세요.")),
+      el("div", { class: "jobs" }, js.map((j) => jobCard(j, !!sel.value)))] : [];
     const ss = sessions.filter((x) => !sel.value || x.company === sel.value);
     const cur = ss.find((x) => x.id === trendBoard);
     let board = null;
@@ -836,7 +870,9 @@
     put(box,
       d.liveFailed ? el("div", { class: "empty" }, "새로 올라온 복기를 불러오지 못해서 정리된 자료만 보여드려요.") : null,
       el("div", { class: "toolbar" }, sel),
+      ...(sel.value ? jobSec : []),
       ...sessSec,
+      ...(rs.length ? [
       el("div", { class: "stats" },
         el("span", {}, el("b", {}, String(rs.length)), " 건의 복기"),
         el("span", {}, el("b", {}, String(bySub.length)), " 개 과목")),
@@ -852,10 +888,12 @@
         el("div", { class: "meta" }, [r.company, r.period, r.qno ? r.qno + "번" : "", r.track, r.subject, r.kind, r.level ? "난이도 " + r.level : "", r.writer ? "by " + r.writer : ""].filter(Boolean).join(" · ")),
         el("div", { class: "topic" }, r.topic),
         r.note ? el("div", { class: "note" }, r.note) : null,
-        sb ? meToo(r) : null))),
+        sb ? meToo(r) : null)))
+      ] : [el("p", { class: "muted" }, "이 기업 복기는 아직 없어요. 시험 보고 왔다면 '복기 남기기'에서 첫 복기를 남겨주세요.")]),
       rs.length > 30 ? el("p", { class: "muted" }, "최근 30건만 보여요. 위에서 기업을 고르면 그 기업 복기만 볼 수 있어요.") : null,
       ivs.length ? el("h2", {}, "면접 기출") : null,
-      ivs.length ? el("div", { class: "panel" }, el("ul", { class: "rules" }, ivs.map((q) => el("li", {}, el("b", {}, q.company), " · ", q.q)))) : null
+      ivs.length ? el("div", { class: "panel" }, el("ul", { class: "rules" }, ivs.map((q) => el("li", {}, el("b", {}, q.company), " · ", q.q)))) : null,
+      ...(sel.value ? [] : jobSec)
     );
   }
 
